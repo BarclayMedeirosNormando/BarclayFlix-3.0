@@ -16,6 +16,15 @@ class SectionState {
   final String? error;
 }
 
+/// Estado do carregamento dos canais de uma categoria.
+class ChannelsState {
+  const ChannelsState({this.loading = false, this.items, this.error});
+
+  final bool loading;
+  final List<XtreamChannel>? items;
+  final String? error;
+}
+
 /// Conexão com um servidor Xtream: autentica e carrega as categorias sob demanda.
 class ServerSessionProvider extends ChangeNotifier {
   ServerSessionProvider(this._api, this.server);
@@ -27,6 +36,7 @@ class ServerSessionProvider extends ChangeNotifier {
   XtreamSession? _session;
   String? _error;
   final Map<XtreamSection, SectionState> _sections = {};
+  final Map<String, ChannelsState> _channels = {};
   bool _disposed = false;
 
   ConnectionPhase get phase => _phase;
@@ -40,6 +50,7 @@ class ServerSessionProvider extends ChangeNotifier {
     _error = null;
     _session = null;
     _sections.clear();
+    _channels.clear();
     _notify();
 
     final result = await _api.connect(server);
@@ -79,6 +90,32 @@ class ServerSessionProvider extends ChangeNotifier {
     _sections[section] = switch (result) {
       ApiSuccess<List<XtreamCategory>>(:final data) => SectionState(items: data),
       _ => SectionState(error: result.failureMessage),
+    };
+    _notify();
+  }
+
+  ChannelsState channels(String categoryId) =>
+      _channels[categoryId] ?? const ChannelsState();
+
+  /// Carrega os canais ao vivo de uma categoria, uma única vez por categoria.
+  Future<void> loadChannels(String categoryId, {bool force = false}) async {
+    final session = _session;
+    if (session == null) return;
+
+    final current = _channels[categoryId];
+    if (!force && current != null && (current.loading || current.items != null)) {
+      return;
+    }
+
+    _channels[categoryId] = const ChannelsState(loading: true);
+    _notify();
+
+    final result = await _api.liveStreams(session, categoryId);
+    if (_disposed) return;
+
+    _channels[categoryId] = switch (result) {
+      ApiSuccess<List<XtreamChannel>>(:final data) => ChannelsState(items: data),
+      _ => ChannelsState(error: result.failureMessage),
     };
     _notify();
   }

@@ -15,6 +15,11 @@ abstract interface class XtreamApi {
     XtreamSession session,
     XtreamSection section,
   );
+
+  Future<ApiResult<List<XtreamChannel>>> liveStreams(
+    XtreamSession session,
+    String categoryId,
+  );
 }
 
 /// Cliente da API Xtream Codes (`player_api.php`).
@@ -87,6 +92,34 @@ class XtreamClient implements XtreamApi {
       );
     } on TypeError {
       return const ApiBadPayload<List<XtreamCategory>>('Categoria com formato inesperado.');
+    }
+  }
+
+  @override
+  Future<ApiResult<List<XtreamChannel>>> liveStreams(
+    XtreamSession session,
+    String categoryId,
+  ) async {
+    final uri = _playerApi(session.baseUri, session.server, {
+      'action': 'get_live_streams',
+      'category_id': categoryId,
+    });
+    final result = await _getJson(uri, listTimeout);
+    if (result is! ApiSuccess<Object?>) {
+      return _fail<List<XtreamChannel>>(result);
+    }
+    final data = result.data;
+    if (data is! List<dynamic>) {
+      return const ApiBadPayload<List<XtreamChannel>>('Lista de canais inesperada.');
+    }
+    try {
+      return ApiSuccess<List<XtreamChannel>>(
+        data
+            .map((e) => XtreamChannel.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+    } on TypeError {
+      return const ApiBadPayload<List<XtreamChannel>>('Canal com formato inesperado.');
     }
   }
 

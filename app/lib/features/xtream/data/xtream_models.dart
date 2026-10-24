@@ -62,6 +62,42 @@ class XtreamSession {
   /// Host que respondeu (já normalizado, sem barra final).
   final Uri baseUri;
   final XtreamUserInfo userInfo;
+
+  /// URL de reprodução de um canal ao vivo (leva usuário e senha: nunca logar).
+  Uri liveUrl(XtreamChannel channel) {
+    final ext = server.streamFormat == StreamFormat.m3u8 ? 'm3u8' : 'ts';
+    return baseUri.replace(
+      path: '${baseUri.path}/live/${Uri.encodeComponent(server.username)}'
+          '/${Uri.encodeComponent(server.password)}/${channel.id}.$ext',
+    );
+  }
+}
+
+/// Canal ao vivo (`get_live_streams`).
+class XtreamChannel {
+  const XtreamChannel({
+    required this.id,
+    required this.name,
+    this.number,
+    this.iconUrl,
+  });
+
+  factory XtreamChannel.fromJson(JsonMap j) => XtreamChannel(
+        id: '${j['stream_id']}',
+        name: '${j['name'] ?? ''}',
+        number: int.tryParse('${j['num'] ?? ''}'),
+        iconUrl: _asUrl(j['stream_icon']),
+      );
+
+  final String id;
+  final String name;
+  final int? number;
+  final String? iconUrl;
+}
+
+String? _asUrl(Object? v) {
+  final s = '${v ?? ''}'.trim();
+  return s.startsWith('http') ? s : null;
 }
 
 class XtreamCategory {

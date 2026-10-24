@@ -32,6 +32,15 @@ class _Api implements XtreamApi {
       const ApiSuccess<List<XtreamCategory>>([
         XtreamCategory(id: '1', name: 'Canais de Esportes'),
       ]);
+
+  @override
+  Future<ApiResult<List<XtreamChannel>>> liveStreams(
+    XtreamSession session,
+    String categoryId,
+  ) async =>
+      const ApiSuccess<List<XtreamChannel>>([
+        XtreamChannel(id: '10', name: 'Canal Teste'),
+      ]);
 }
 
 Widget _app(XtreamApi api) => MaterialApp(
