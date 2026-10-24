@@ -5,6 +5,8 @@ import 'package:barclayflix/features/xtream/data/xtream_models.dart';
 import 'package:barclayflix/features/xtream/state/server_session_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/unused_xtream.dart';
+
 const _server = XtreamServer(
   id: 's1',
   apelido: 'TVPLAY',
@@ -28,7 +30,7 @@ final _session = XtreamSession(
   userInfo: _info,
 );
 
-class FakeXtream implements XtreamApi {
+class FakeXtream with UnusedXtreamMethods implements XtreamApi {
   FakeXtream({required this.connectResults, this.categoryResult});
 
   final List<ApiResult<XtreamSession>> connectResults;

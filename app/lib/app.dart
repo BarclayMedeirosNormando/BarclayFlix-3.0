@@ -7,15 +7,24 @@ import 'features/auth/state/auth_provider.dart';
 import 'features/auth/ui/activation_screen.dart';
 import 'features/auth/ui/status_screen.dart';
 import 'features/home/ui/home_placeholder_screen.dart';
+import 'features/progress/data/progress_repository.dart';
 import 'features/xtream/data/xtream_client.dart';
 
 class BarclayFlixApp extends StatelessWidget {
-  const BarclayFlixApp({super.key, required this.checker, this.xtream});
+  const BarclayFlixApp({
+    super.key,
+    required this.checker,
+    this.xtream,
+    this.progress = const NullProgressApi(),
+  });
 
   final DeviceChecker checker;
 
   /// Cliente Xtream. Se omitido, usa o [XtreamClient] real.
   final XtreamApi? xtream;
+
+  /// Progresso de reprodução (padrão: nenhum, usado em testes).
+  final ProgressApi progress;
 
   @override
   Widget build(BuildContext context) {
@@ -27,6 +36,7 @@ class BarclayFlixApp extends StatelessWidget {
             if (api is XtreamClient) api.dispose();
           },
         ),
+        Provider<ProgressApi>.value(value: progress),
         ChangeNotifierProvider(create: (_) => AuthProvider(checker)..start()),
       ],
       child: MaterialApp(

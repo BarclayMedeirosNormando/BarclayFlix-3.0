@@ -20,6 +20,26 @@ abstract interface class XtreamApi {
     XtreamSession session,
     String categoryId,
   );
+
+  Future<ApiResult<List<XtreamMovie>>> vodStreams(
+    XtreamSession session,
+    String categoryId,
+  );
+
+  Future<ApiResult<List<XtreamSeries>>> seriesList(
+    XtreamSession session,
+    String categoryId,
+  );
+
+  Future<ApiResult<XtreamSeriesDetail>> seriesInfo(
+    XtreamSession session,
+    String seriesId,
+  );
+
+  Future<ApiResult<XtreamVodInfo>> vodInfo(
+    XtreamSession session,
+    String vodId,
+  );
 }
 
 /// Cliente da API Xtream Codes (`player_api.php`).
@@ -120,6 +140,85 @@ class XtreamClient implements XtreamApi {
       );
     } on TypeError {
       return const ApiBadPayload<List<XtreamChannel>>('Canal com formato inesperado.');
+    }
+  }
+
+  @override
+  Future<ApiResult<List<XtreamMovie>>> vodStreams(
+    XtreamSession session,
+    String categoryId,
+  ) =>
+      _listOf(session, 'get_vod_streams', {'category_id': categoryId},
+          XtreamMovie.fromJson, 'filmes');
+
+  @override
+  Future<ApiResult<List<XtreamSeries>>> seriesList(
+    XtreamSession session,
+    String categoryId,
+  ) =>
+      _listOf(session, 'get_series', {'category_id': categoryId},
+          XtreamSeries.fromJson, 'séries');
+
+  @override
+  Future<ApiResult<XtreamSeriesDetail>> seriesInfo(
+    XtreamSession session,
+    String seriesId,
+  ) async {
+    final uri = _playerApi(session.baseUri, session.server,
+        {'action': 'get_series_info', 'series_id': seriesId});
+    final result = await _getJson(uri, listTimeout);
+    if (result is! ApiSuccess<Object?>) return _fail<XtreamSeriesDetail>(result);
+    final data = result.data;
+    if (data is! Map<String, dynamic>) {
+      return ApiBadPayload<XtreamSeriesDetail>('Detalhe da série inesperado.');
+    }
+    try {
+      return ApiSuccess<XtreamSeriesDetail>(XtreamSeriesDetail.fromJson(data));
+    } on TypeError {
+      return ApiBadPayload<XtreamSeriesDetail>('Série com formato inesperado.');
+    }
+  }
+
+  @override
+  Future<ApiResult<XtreamVodInfo>> vodInfo(
+    XtreamSession session,
+    String vodId,
+  ) async {
+    final uri = _playerApi(session.baseUri, session.server,
+        {'action': 'get_vod_info', 'vod_id': vodId});
+    final result = await _getJson(uri, listTimeout);
+    if (result is! ApiSuccess<Object?>) return _fail<XtreamVodInfo>(result);
+    final data = result.data;
+    if (data is! Map<String, dynamic>) {
+      return ApiBadPayload<XtreamVodInfo>('Detalhe do filme inesperado.');
+    }
+    try {
+      return ApiSuccess<XtreamVodInfo>(XtreamVodInfo.fromJson(data, vodId));
+    } on TypeError {
+      return ApiBadPayload<XtreamVodInfo>('Filme com formato inesperado.');
+    }
+  }
+
+  Future<ApiResult<List<T>>> _listOf<T>(
+    XtreamSession session,
+    String action,
+    Map<String, String> extra,
+    T Function(JsonMap) parse,
+    String label,
+  ) async {
+    final uri = _playerApi(session.baseUri, session.server, {'action': action, ...extra});
+    final result = await _getJson(uri, listTimeout);
+    if (result is! ApiSuccess<Object?>) return _fail<List<T>>(result);
+    final data = result.data;
+    if (data is! List<dynamic>) {
+      return ApiBadPayload<List<T>>('Lista de $label inesperada.');
+    }
+    try {
+      return ApiSuccess<List<T>>([
+        for (final e in data) parse(e as Map<String, dynamic>),
+      ]);
+    } on TypeError {
+      return ApiBadPayload<List<T>>('Item de $label com formato inesperado.');
     }
   }
 
