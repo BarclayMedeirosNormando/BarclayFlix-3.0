@@ -48,9 +48,10 @@ class _LiveViewState extends State<LiveView> {
     final state = provider.channels(_category.id);
 
     return LayoutBuilder(builder: (context, box) {
+      if (box.maxWidth < 700) return _compact(provider, state);
       // Telas estreitas (celular, janela pequena) escondem o painel lateral.
       final showInfo = box.maxWidth >= 1000;
-      final categoriesWidth = box.maxWidth >= 700 ? 300.0 : 160.0;
+      const categoriesWidth = 300.0;
       return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
       child: Row(
@@ -97,6 +98,45 @@ class _LiveViewState extends State<LiveView> {
       ),
     );
     });
+  }
+
+  /// Celular: categorias em fichas na horizontal e lista de canais em largura total.
+  Widget _compact(ServerSessionProvider provider, ChannelsState state) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          height: 52,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            itemCount: widget.categories.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              final c = widget.categories[i];
+              final on = c.id == _category.id;
+              return ChoiceChip(
+                label: Text(c.name),
+                selected: on,
+                showCheckmark: false,
+                selectedColor: AppColors.accent,
+                labelStyle: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: on ? AppColors.onAccent : null,
+                ),
+                onSelected: (_) => _select(c),
+              );
+            },
+          ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _channels(provider, state),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _channels(ServerSessionProvider provider, ChannelsState state) {
