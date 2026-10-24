@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -41,11 +42,14 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  late final Player _player = Player();
+  late final Player _player = Player(
+    configuration: const PlayerConfiguration(bufferSize: 64 * 1024 * 1024),
+  );
   late final VideoController _video = VideoController(_player);
   final FocusNode _focus = FocusNode(debugLabel: 'player');
   late int _index = widget.initialIndex;
   Timer? _saveTimer;
+  Timer? _hideTimer;
   String? _error;
   bool _buffering = true;
   bool _showInfo = true;
@@ -66,18 +70,47 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _open();
   }
 
+  /// Mostra os controles e os esconde após 4 s sem interação.
+  void _poke() {
+    if (!mounted) return;
+    setState(() => _showInfo = true);
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted && _error == null) setState(() => _showInfo = false);
+    });
+  }
+
   void _report() {
     if (_item.isLive) return;
     widget.onProgress?.call(_item, _player.state.position, _player.state.duration);
+  }
+
+  /// TVs/boxes antigos (ex.: TCL 32 bits) travam com o ajuste padrão: usa
+  /// decodificação por hardware em modo "copy" (mais compatível) e mais cache.
+  Future<void> _tuneForWeakDevices() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      final native = _player.platform;
+      if (native is NativePlayer) {
+        await native.setProperty('hwdec', 'mediacodec-copy');
+        await native.setProperty('cache', 'yes');
+        await native.setProperty('cache-secs', '30');
+        await native.setProperty('demuxer-readahead-secs', '30');
+        await native.setProperty('framedrop', 'vo');
+      }
+    } catch (_) {
+      // Ajuste opcional: se falhar, segue com o padrão.
+    }
   }
 
   Future<void> _open() async {
     setState(() {
       _error = null;
       _buffering = true;
-      _showInfo = true;
     });
+    _poke();
     try {
+      await _tuneForWeakDevices();
       final start = _item.startAt;
       await _player.open(
         Media(_item.url.toString(), start: start > Duration.zero ? start : null),
@@ -99,7 +132,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _seek(int seconds) {
     final target = _player.state.position + Duration(seconds: seconds);
     _player.seek(target < Duration.zero ? Duration.zero : target);
-    setState(() => _showInfo = true);
+    _poke();
   }
 
   void _exit() => Navigator.of(context).maybePop();
@@ -109,10 +142,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final key = event.logicalKey;
     final live = _item.isLive;
 
+    // O botão Voltar do controle/Android (goBack) é tratado pelo sistema, que já
+    // fecha a tela; tratar aqui também fechava duas telas de uma vez.
     if (key == LogicalKeyboardKey.escape ||
-        key == LogicalKeyboardKey.backspace ||
-        key == LogicalKeyboardKey.goBack ||
-        key == LogicalKeyboardKey.browserBack) {
+        key == LogicalKeyboardKey.backspace) {
       _exit();
     } else if (live && key == LogicalKeyboardKey.arrowLeft) {
       _exit();
@@ -134,7 +167,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.space) {
       _player.playOrPause();
-      setState(() => _showInfo = true);
+      _poke();
     } else {
       return KeyEventResult.ignored;
     }
@@ -145,6 +178,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _saveTimer?.cancel();
+    _hideTimer?.cancel();
     _report();
     _focus.dispose();
     _player.dispose();
@@ -162,7 +196,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
         onKeyEvent: _onKey,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: () => setState(() => _showInfo = !_showInfo),
+          onTap: () {
+            if (_showInfo) {
+              _hideTimer?.cancel();
+              setState(() => _showInfo = false);
+            } else {
+              _poke();
+            }
+          },
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -239,11 +280,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ),
                 ),
               if (_showInfo)
+                Center(
+                  child: _Controls(
+                    player: _player,
+                    live: item.isLive,
+                    hasOthers: widget.items.length > 1,
+                    onPrev: () => _go(-1),
+                    onNext: () => _go(1),
+                    onSeek: _seek,
+                    onTouch: _poke,
+                  ),
+                ),
+              if (_showInfo)
                 Positioned(
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  child: _Bottom(player: _player, live: item.isLive, hasNext: widget.items.length > 1),
+                  child: _Bottom(
+                    player: _player,
+                    live: item.isLive,
+                    hasNext: widget.items.length > 1,
+                    onTouch: _poke,
+                  ),
                 ),
             ],
           ),
@@ -253,16 +311,95 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 }
 
-/// Barra de progresso (filmes/episódios) e atalhos.
+/// Botões na tela (toque e controle): anterior, voltar/avançar 10 s, pausar, próximo.
+class _Controls extends StatelessWidget {
+  const _Controls({
+    required this.player,
+    required this.live,
+    required this.hasOthers,
+    required this.onPrev,
+    required this.onNext,
+    required this.onSeek,
+    required this.onTouch,
+  });
+
+  final Player player;
+  final bool live;
+  final bool hasOthers;
+  final VoidCallback onPrev;
+  final VoidCallback onNext;
+  final ValueChanged<int> onSeek;
+  final VoidCallback onTouch;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget button(IconData icon, String tip, VoidCallback onTap, {double size = 36}) {
+      return IconButton(
+        tooltip: tip,
+        iconSize: size,
+        color: Colors.white,
+        style: IconButton.styleFrom(
+          backgroundColor: Colors.black45,
+          padding: const EdgeInsets.all(14),
+        ),
+        icon: Icon(icon),
+        onPressed: () {
+          onTap();
+          onTouch();
+        },
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (hasOthers) button(Icons.skip_previous, live ? 'Canal anterior' : 'Anterior', onPrev),
+        if (!live) ...[
+          const SizedBox(width: 16),
+          button(Icons.replay_10, 'Voltar 10 s', () => onSeek(-10)),
+        ],
+        const SizedBox(width: 16),
+        StreamBuilder<bool>(
+          stream: player.stream.playing,
+          initialData: player.state.playing,
+          builder: (context, snap) => button(
+            snap.data == true ? Icons.pause : Icons.play_arrow,
+            snap.data == true ? 'Pausar' : 'Reproduzir',
+            player.playOrPause,
+            size: 52,
+          ),
+        ),
+        if (!live) ...[
+          const SizedBox(width: 16),
+          button(Icons.forward_10, 'Avançar 10 s', () => onSeek(10)),
+        ],
+        if (hasOthers) ...[
+          const SizedBox(width: 16),
+          button(Icons.skip_next, live ? 'Próximo canal' : 'Próximo', onNext),
+        ],
+      ],
+    );
+  }
+}
+
+/// Barra de progresso (filmes/episódios) e atalhos de teclado.
 class _Bottom extends StatelessWidget {
-  const _Bottom({required this.player, required this.live, required this.hasNext});
+  const _Bottom({
+    required this.player,
+    required this.live,
+    required this.hasNext,
+    required this.onTouch,
+  });
 
   final Player player;
   final bool live;
   final bool hasNext;
+  final VoidCallback onTouch;
 
   @override
   Widget build(BuildContext context) {
+    // Em telas pequenas (celular) os atalhos de teclado são só ruído.
+    final showHints = MediaQuery.sizeOf(context).shortestSide >= 600;
     final hints = live
         ? '↑ ↓ trocar de canal     OK pausar     ← voltar'
         : '← → 10 s     OK pausar${hasNext ? '     PgUp PgDn episódio' : ''}     Esc voltar';
@@ -278,13 +415,14 @@ class _Bottom extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (!live) _ProgressBar(player: player),
-          if (!live) const SizedBox(height: 12),
-          Text(
-            hints,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white70, fontSize: 16),
-          ),
+          if (!live) _ProgressBar(player: player, onTouch: onTouch),
+          if (!live && showHints) const SizedBox(height: 8),
+          if (showHints)
+            Text(
+              hints,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 16),
+            ),
         ],
       ),
     );
@@ -292,9 +430,10 @@ class _Bottom extends StatelessWidget {
 }
 
 class _ProgressBar extends StatelessWidget {
-  const _ProgressBar({required this.player});
+  const _ProgressBar({required this.player, required this.onTouch});
 
   final Player player;
+  final VoidCallback onTouch;
 
   @override
   Widget build(BuildContext context) {
@@ -303,24 +442,31 @@ class _ProgressBar extends StatelessWidget {
       builder: (context, snap) {
         final pos = snap.data ?? player.state.position;
         final dur = player.state.duration;
-        final fraction =
-            dur.inMilliseconds > 0 ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0) : 0.0;
+        final max = dur.inMilliseconds.toDouble();
+        final value = max > 0 ? pos.inMilliseconds.clamp(0, dur.inMilliseconds).toDouble() : 0.0;
         return Row(
           children: [
             Text(formatDuration(pos), style: const TextStyle(color: Colors.white)),
-            const SizedBox(width: 16),
             Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: fraction,
-                  minHeight: 8,
-                  backgroundColor: Colors.white24,
-                  valueColor: const AlwaysStoppedAnimation(Color(0xFFFFB224)),
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  activeTrackColor: const Color(0xFFFFB224),
+                  inactiveTrackColor: Colors.white24,
+                  thumbColor: const Color(0xFFFFB224),
+                  trackHeight: 5,
+                ),
+                child: Slider(
+                  value: value,
+                  max: max > 0 ? max : 1,
+                  onChanged: max > 0
+                      ? (v) {
+                          player.seek(Duration(milliseconds: v.round()));
+                          onTouch();
+                        }
+                      : null,
                 ),
               ),
             ),
-            const SizedBox(width: 16),
             Text(formatDuration(dur), style: const TextStyle(color: Colors.white70)),
           ],
         );

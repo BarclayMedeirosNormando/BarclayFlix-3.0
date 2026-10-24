@@ -57,8 +57,9 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final server = context.read<ServerSessionProvider>().server;
+    final narrow = MediaQuery.sizeOf(context).width < 700;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 24, 4),
+      padding: EdgeInsets.fromLTRB(narrow ? 4 : 16, 12, narrow ? 8 : 24, 4),
       child: Row(
         children: [
           IconButton(
@@ -74,9 +75,11 @@ class _Header extends StatelessWidget {
             ),
             onPressed: () => Navigator.of(context).maybePop(),
           ),
-          const SizedBox(width: 8),
-          const _Brand(),
-          const SizedBox(width: 32),
+          if (!narrow) ...[
+            const SizedBox(width: 8),
+            const _Brand(),
+            const SizedBox(width: 32),
+          ],
           if (onSelect != null)
             Flexible(
               child: SingleChildScrollView(
@@ -95,6 +98,7 @@ class _Header extends StatelessWidget {
             )
           else
             const Spacer(),
+          if (!narrow) ...[
           const SizedBox(width: 16),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -105,6 +109,7 @@ class _Header extends StatelessWidget {
             child: Text(server.apelido,
                 style: const TextStyle(fontWeight: FontWeight.w700)),
           ),
+          ],
         ],
       ),
     );

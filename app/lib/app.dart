@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -43,6 +44,7 @@ class BarclayFlixApp extends StatelessWidget {
         title: 'BarclayFlix',
         debugShowCheckedModeBanner: false,
         theme: buildAppTheme(),
+        builder: (context, child) => _TvScale(child: child ?? const SizedBox()),
         home: const AuthGate(),
       ),
     );
@@ -72,5 +74,43 @@ class AuthGate extends StatelessWidget {
         ),
       _ => const ActivationScreen(),
     };
+  }
+}
+
+/// Em TVs Android a tela lógica é pequena e a interface (desenhada para 1080p)
+/// fica grande demais; reduz tudo proporcionalmente. Celular e Windows: sem efeito.
+class _TvScale extends StatelessWidget {
+  const _TvScale({required this.child});
+
+  final Widget child;
+
+  static const double scale = 0.75;
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final size = mq.size;
+    final isTv = defaultTargetPlatform == TargetPlatform.android &&
+        size.width >= 900 &&
+        size.width / size.height > 1.6;
+    if (!isTv) return child;
+    final inner = Size(size.width / scale, size.height / scale);
+    return ClipRect(
+      child: OverflowBox(
+        alignment: Alignment.topLeft,
+        minWidth: inner.width,
+        maxWidth: inner.width,
+        minHeight: inner.height,
+        maxHeight: inner.height,
+        child: Transform.scale(
+          scale: scale,
+          alignment: Alignment.topLeft,
+          child: MediaQuery(
+            data: mq.copyWith(size: inner),
+            child: SizedBox(width: inner.width, height: inner.height, child: child),
+          ),
+        ),
+      ),
+    );
   }
 }
