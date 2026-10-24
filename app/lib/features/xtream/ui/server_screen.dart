@@ -5,7 +5,22 @@ import '../../../core/format.dart';
 import '../../../core/theme/app_theme.dart';
 import '../data/xtream_models.dart';
 import '../state/server_session_provider.dart';
+import '../../home/ui/home_view.dart';
+import 'catalog_view.dart';
 import 'live_view.dart';
+
+/// Abas do servidor. [section] é nulo no Início.
+enum ServerTab {
+  home('Início', null),
+  live('Ao vivo', XtreamSection.live),
+  vod('Filmes', XtreamSection.vod),
+  series('Séries', XtreamSection.series);
+
+  const ServerTab(this.label, this.section);
+
+  final String label;
+  final XtreamSection? section;
+}
 
 /// Tela de um servidor: cabeçalho com navegação (Ao vivo, Filmes, Séries),
 /// dados reais da conta e a lista da seção escolhida.
@@ -36,8 +51,8 @@ class ServerScreen extends StatelessWidget {
 class _Header extends StatelessWidget {
   const _Header({this.selected, this.onSelect});
 
-  final int? selected;
-  final ValueChanged<int>? onSelect;
+  final ServerTab? selected;
+  final ValueChanged<ServerTab>? onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -68,11 +83,11 @@ class _Header extends StatelessWidget {
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
-                    for (final (i, section) in XtreamSection.values.indexed)
+                    for (final tab in ServerTab.values)
                       _NavItem(
-                        label: section.label,
-                        selected: i == selected,
-                        onTap: () => onSelect!(i),
+                        label: tab.label,
+                        selected: tab == selected,
+                        onTap: () => onSelect!(tab),
                       ),
                   ],
                 ),
@@ -244,25 +259,26 @@ class _ReadyBody extends StatefulWidget {
 }
 
 class _ReadyBodyState extends State<_ReadyBody> {
-  int _index = 0;
+  ServerTab _tab = ServerTab.home;
+
+  void _select(ServerTab tab) {
+    setState(() => _tab = tab);
+    final section = tab.section;
+    if (section != null) {
+      context.read<ServerSessionProvider>().loadCategories(section);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        _Header(
-          selected: _index,
-          onSelect: (i) {
-            setState(() => _index = i);
-            context.read<ServerSessionProvider>().loadCategories(XtreamSection.values[i]);
-          },
-        ),
+        _Header(selected: _tab, onSelect: _select),
         _AccountInfo(info: widget.session.userInfo),
         Expanded(
-          child: _CategoryList(
-            key: ValueKey(XtreamSection.values[_index]),
-            section: XtreamSection.values[_index],
-          ),
+          child: _tab == ServerTab.home
+              ? HomeView(onOpenLive: () => _select(ServerTab.live))
+              : _CategoryList(key: ValueKey(_tab), section: _tab.section!),
         ),
       ],
     );
@@ -349,19 +365,8 @@ class _CategoryListState extends State<_CategoryList> {
       return const Center(child: Text('Nenhuma categoria.'));
     }
 
-    if (widget.section == XtreamSection.live) {
-      return LiveView(categories: items);
-    }
-
-    return ListView.builder(
-      itemCount: items.length,
-      itemBuilder: (context, i) => ListTile(
-        dense: true,
-        title: Text(items[i].name),
-        // Filmes e séries ainda sem lista; o onTap vazio mantém o item focável
-        // (rolagem pelo D-Pad).
-        onTap: () {},
-      ),
-    );
+    return widget.section == XtreamSection.live
+        ? LiveView(categories: items)
+        : CatalogView(section: widget.section, categories: items);
   }
 }

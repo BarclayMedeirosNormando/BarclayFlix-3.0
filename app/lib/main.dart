@@ -9,6 +9,7 @@ import 'core/device/platform_kind.dart';
 import 'core/network/api_client.dart';
 import 'core/ui/config_error_app.dart';
 import 'features/auth/data/auth_repository.dart';
+import 'features/progress/data/progress_repository.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,7 +28,10 @@ Future<void> main() async {
   final platform = await detectPlatform();
   final api = ApiClient(baseUrl: config.apiUrl.trim(), appVersion: info.version);
 
+  final identity = DeviceIdentity();
+
   runApp(BarclayFlixApp(
-    checker: AuthRepository(api, DeviceIdentity(), platform),
+    checker: AuthRepository(api, identity, platform),
+    progress: ProgressRepository(api, identity),
   ));
 }

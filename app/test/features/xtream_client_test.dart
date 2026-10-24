@@ -262,4 +262,147 @@ void main() {
     expect(await client.liveStreams(session, '1'),
         isA<ApiBadPayload<List<XtreamChannel>>>());
   });
+
+  test('lista filmes e monta a URL do filme', () async {
+    late Uri sent;
+    final client = clientWith((req) async {
+      if (req.url.queryParameters['action'] == null) {
+        return jsonResponse(authBody());
+      }
+      sent = req.url;
+      return jsonResponse([
+        {
+          'stream_id': 77,
+          'name': 'Filme X',
+          'stream_icon': 'http://img.xyz/x.jpg',
+          'rating': '7.46',
+          'container_extension': 'mkv',
+        },
+        {'stream_id': '78', 'name': 'Filme Y', 'rating': '0', 'container_extension': ''},
+      ]);
+    });
+    final session = (await client.connect(server())).dataOrNull!;
+
+    final r = await client.vodStreams(session, '9');
+
+    expect(sent.queryParameters['action'], 'get_vod_streams');
+    expect(sent.queryParameters['category_id'], '9');
+    final items = r.dataOrNull!;
+    expect(items[0].rating, '7.5');
+    expect(items[1].rating, isNull);
+    expect(items[1].extension, 'mp4');
+    expect(
+      session.movieUrl(items[0].id, items[0].extension).toString(),
+      'http://a.xyz/movie/u/p/77.mkv',
+    );
+  });
+
+  test('lista séries com ano e nota', () async {
+    final client = clientWith((req) async {
+      if (req.url.queryParameters['action'] == null) {
+        return jsonResponse(authBody());
+      }
+      return jsonResponse([
+        {
+          'series_id': 5,
+          'name': 'Série A',
+          'cover': 'http://img.xyz/a.jpg',
+          'plot': 'Sinopse',
+          'rating': '8',
+          'releaseDate': '2021-03-04',
+        },
+      ]);
+    });
+    final session = (await client.connect(server())).dataOrNull!;
+
+    final items = (await client.seriesList(session, '3')).dataOrNull!;
+
+    expect(items.single.id, '5');
+    expect(items.single.year, '2021');
+    expect(items.single.rating, '8.0');
+    expect(items.single.plot, 'Sinopse');
+  });
+
+  test('detalhe da série agrupa episódios por temporada em ordem', () async {
+    late Uri sent;
+    final client = clientWith((req) async {
+      if (req.url.queryParameters['action'] == null) {
+        return jsonResponse(authBody());
+      }
+      sent = req.url;
+      return jsonResponse({
+        'info': {'name': 'Série A', 'plot': 'P', 'rating': '7'},
+        'episodes': {
+          '2': [
+            {'id': '201', 'episode_num': 1, 'title': 'S2E1', 'container_extension': 'mp4'},
+          ],
+          '1': [
+            {
+              'id': '102',
+              'episode_num': '2',
+              'title': 'S1E2',
+              'container_extension': 'mp4',
+              'info': {'duration_secs': 1500},
+            },
+            {'id': '101', 'episode_num': '1', 'title': 'S1E1', 'container_extension': 'mkv'},
+          ],
+        },
+      });
+    });
+    final session = (await client.connect(server())).dataOrNull!;
+
+    final d = (await client.seriesInfo(session, '5')).dataOrNull!;
+
+    expect(sent.queryParameters['action'], 'get_series_info');
+    expect(sent.queryParameters['series_id'], '5');
+    expect(d.name, 'Série A');
+    expect(d.seasons.keys.toList(), [1, 2]);
+    expect(d.seasons[1]!.map((e) => e.id), ['101', '102']);
+    expect(d.seasons[1]![1].duration, const Duration(seconds: 1500));
+    expect(d.episodeById('201')?.season, 2);
+    expect(
+      session.episodeUrl('101', 'mkv').toString(),
+      'http://a.xyz/series/u/p/101.mkv',
+    );
+  });
+
+  test('detalhe da série aceita episódios em lista de listas', () async {
+    final client = clientWith((req) async {
+      if (req.url.queryParameters['action'] == null) {
+        return jsonResponse(authBody());
+      }
+      return jsonResponse({
+        'info': {'name': 'B'},
+        'episodes': [
+          [
+            {'id': '1', 'episode_num': 1, 'title': 'Um', 'container_extension': 'mp4'},
+          ],
+        ],
+      });
+    });
+    final session = (await client.connect(server())).dataOrNull!;
+
+    final d = (await client.seriesInfo(session, '9')).dataOrNull!;
+
+    expect(d.seasons.keys.toList(), [1]);
+  });
+
+  test('vod_info devolve nome, imagem e extensão', () async {
+    final client = clientWith((req) async {
+      if (req.url.queryParameters['action'] == null) {
+        return jsonResponse(authBody());
+      }
+      return jsonResponse({
+        'info': {'name': 'Filme Z', 'movie_image': 'http://img.xyz/z.jpg'},
+        'movie_data': {'stream_id': 9, 'container_extension': 'mkv'},
+      });
+    });
+    final session = (await client.connect(server())).dataOrNull!;
+
+    final v = (await client.vodInfo(session, '9')).dataOrNull!;
+
+    expect(v.name, 'Filme Z');
+    expect(v.extension, 'mkv');
+    expect(v.imageUrl, 'http://img.xyz/z.jpg');
+  });
 }

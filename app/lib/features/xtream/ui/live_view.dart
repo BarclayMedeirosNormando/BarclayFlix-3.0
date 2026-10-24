@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/focus_tile.dart';
-import '../../player/ui/player_screen.dart';
+import '../../player/ui/play_launcher.dart';
 import '../data/xtream_models.dart';
 import '../state/server_session_provider.dart';
 
@@ -125,13 +125,11 @@ class _LiveViewState extends State<LiveView> {
         final ch = channels[i];
         return FocusTile(
           onFocus: () => setState(() => _focusedChannel = ch),
-          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-            builder: (_) => PlayerScreen(
-              channels: channels,
-              initialIndex: i,
-              session: provider.session!,
-            ),
-          )),
+          onTap: () => launchPlayer(
+            context,
+            [for (final c in channels) provider.channelItem(c)],
+            index: i,
+          ),
           child: Row(
             children: [
               ChannelLogo(url: ch.iconUrl, size: 44),

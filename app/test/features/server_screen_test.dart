@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
+import '../support/unused_xtream.dart';
+
 const _server = XtreamServer(
   id: 's1',
   apelido: 'TVPLAY',
@@ -16,7 +18,7 @@ const _server = XtreamServer(
   password: 'p',
 );
 
-class _Api implements XtreamApi {
+class _Api with UnusedXtreamMethods implements XtreamApi {
   _Api(this.connectResult);
 
   final ApiResult<XtreamSession> connectResult;
@@ -71,9 +73,15 @@ void main() {
 
     expect(find.textContaining('Vence em 15/12/2026'), findsOneWidget);
     expect(find.textContaining('Conexões: 1/2'), findsOneWidget);
+    expect(find.text('Início'), findsOneWidget);
     expect(find.text('Ao vivo'), findsOneWidget);
     expect(find.text('Filmes'), findsOneWidget);
     expect(find.text('Séries'), findsOneWidget);
+
+    // O Início é a aba padrão; as categorias aparecem em "Ao vivo".
+    await tester.tap(find.text('Ao vivo'));
+    await tester.pump();
+    await tester.pump();
     expect(find.text('Canais de Esportes'), findsOneWidget);
   });
 

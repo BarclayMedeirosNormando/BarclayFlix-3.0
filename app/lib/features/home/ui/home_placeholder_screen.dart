@@ -5,6 +5,7 @@ import '../../../core/format.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/data/device_models.dart';
 import '../../auth/state/auth_provider.dart';
+import '../../progress/data/progress_repository.dart';
 import '../../xtream/data/xtream_client.dart';
 import '../../xtream/state/server_session_provider.dart';
 import '../../xtream/ui/server_screen.dart';
@@ -89,10 +90,11 @@ class HomePlaceholderScreen extends StatelessWidget {
 
   void _open(BuildContext context, XtreamServer server) {
     final api = context.read<XtreamApi>();
+    final progress = context.read<ProgressApi>();
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ChangeNotifierProvider(
-          create: (_) => ServerSessionProvider(api, server)..connect(),
+          create: (_) => ServerSessionProvider(api, server, progress: progress)..connect(),
           child: const ServerScreen(),
         ),
       ),
