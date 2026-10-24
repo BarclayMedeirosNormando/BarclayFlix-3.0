@@ -7,16 +7,28 @@ import 'features/auth/state/auth_provider.dart';
 import 'features/auth/ui/activation_screen.dart';
 import 'features/auth/ui/status_screen.dart';
 import 'features/home/ui/home_placeholder_screen.dart';
+import 'features/xtream/data/xtream_client.dart';
 
 class BarclayFlixApp extends StatelessWidget {
-  const BarclayFlixApp({super.key, required this.checker});
+  const BarclayFlixApp({super.key, required this.checker, this.xtream});
 
   final DeviceChecker checker;
 
+  /// Cliente Xtream. Se omitido, usa o [XtreamClient] real.
+  final XtreamApi? xtream;
+
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => AuthProvider(checker)..start(),
+    return MultiProvider(
+      providers: [
+        Provider<XtreamApi>(
+          create: (_) => xtream ?? XtreamClient(),
+          dispose: (_, api) {
+            if (api is XtreamClient) api.dispose();
+          },
+        ),
+        ChangeNotifierProvider(create: (_) => AuthProvider(checker)..start()),
+      ],
       child: MaterialApp(
         title: 'BarclayFlix',
         debugShowCheckedModeBanner: false,

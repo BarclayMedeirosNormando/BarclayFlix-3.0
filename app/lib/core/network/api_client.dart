@@ -78,7 +78,8 @@ class ApiClient {
     } on TimeoutException {
       return ApiTimeout<JsonMap>();
     } on Exception catch (e) {
-      return ApiNetworkError<JsonMap>(e.toString());
+      // Só o tipo: a mensagem da exceção pode conter a URL (com o device_id).
+      return ApiNetworkError<JsonMap>(e.runtimeType.toString());
     }
   }
 
