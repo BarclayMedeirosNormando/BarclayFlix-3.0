@@ -12,7 +12,7 @@ import '../../xtream/data/xtream_models.dart';
 /// o player é descartado para liberar a conexão no servidor.
 ///
 /// Controles: ↑/PageUp = próximo canal, ↓/PageDown = anterior, OK/Espaço =
-/// pausar, Esc/Voltar = sair. Toque na tela mostra/oculta o título.
+/// pausar, ← / Esc / Backspace / Voltar = sair. Toque na tela mostra/oculta o título.
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({
     super.key,
@@ -81,6 +81,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else if (key == LogicalKeyboardKey.arrowDown ||
         key == LogicalKeyboardKey.pageDown) {
       _go(-1);
+    } else if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.backspace ||
+        key == LogicalKeyboardKey.goBack ||
+        key == LogicalKeyboardKey.browserBack) {
+      Navigator.of(context).maybePop();
     } else if (key == LogicalKeyboardKey.select ||
         key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.space) {
@@ -148,9 +154,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ),
                     child: Row(
                       children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back, color: Colors.white),
-                          onPressed: () => Navigator.of(context).maybePop(),
+                        // Botão "Voltar" sempre com destaque: a tecla ← (ou Esc)
+                        // faz a mesma coisa, e o rótulo deixa isso claro.
+                        InkWell(
+                          borderRadius: BorderRadius.circular(32),
+                          onTap: () => Navigator.of(context).maybePop(),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(32),
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.arrow_back, color: Colors.white),
+                                SizedBox(width: 8),
+                                Text('Voltar',
+                                    style: TextStyle(
+                                        color: Colors.white, fontWeight: FontWeight.w700)),
+                              ],
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -168,9 +194,40 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ),
                   ),
                 ),
+              if (_showInfo)
+                const Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: _Hints(),
+                ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Atalhos do player (teclado e controle remoto).
+class _Hints extends StatelessWidget {
+  const _Hints();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(24, 40, 24, 20),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: [Colors.black87, Colors.transparent],
+        ),
+      ),
+      child: const Text(
+        '↑ ↓ trocar de canal     OK pausar     ← voltar',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: Colors.white70, fontSize: 16),
       ),
     );
   }
