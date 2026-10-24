@@ -52,6 +52,7 @@ releases/
 *.iml
 .vscode/*
 !.vscode/settings.json
+!.vscode/launch.json
 !.vscode/extensions.json
 .DS_Store
 Thumbs.db
