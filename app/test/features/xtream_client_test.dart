@@ -193,4 +193,73 @@ void main() {
 
     expect(r, isA<ApiBadPayload<List<XtreamCategory>>>());
   });
+
+  test('lista canais ao vivo da categoria e monta a URL de reprodução', () async {
+    late Uri sent;
+    final client = clientWith((req) async {
+      if (req.url.queryParameters['action'] == null) {
+        return jsonResponse(authBody());
+      }
+      sent = req.url;
+      return jsonResponse([
+        {
+          'num': 1,
+          'name': 'Canal Um',
+          'stream_id': 101,
+          'stream_icon': 'http://img.xyz/1.png',
+        },
+        {'num': '2', 'name': 'Canal Dois', 'stream_id': '102', 'stream_icon': ''},
+      ]);
+    });
+    final session = (await client.connect(server())).dataOrNull!;
+
+    final r = await client.liveStreams(session, '7');
+
+    expect(sent.queryParameters['action'], 'get_live_streams');
+    expect(sent.queryParameters['category_id'], '7');
+    final items = r.dataOrNull!;
+    expect(items.map((c) => c.id), ['101', '102']);
+    expect(items[0].iconUrl, 'http://img.xyz/1.png');
+    expect(items[1].iconUrl, isNull);
+    expect(session.liveUrl(items[0]).toString(), 'http://a.xyz/live/u/p/101.ts');
+  });
+
+  test('URL de reprodução usa m3u8 quando o servidor pede', () {
+    final s = XtreamSession(
+      server: const XtreamServer(
+        id: 's1',
+        apelido: 'X',
+        hosts: ['http://a.xyz'],
+        username: 'u',
+        password: 'p',
+        streamFormat: StreamFormat.m3u8,
+      ),
+      baseUri: Uri.parse('http://a.xyz:8080'),
+      userInfo: const XtreamUserInfo(
+        authorized: true,
+        status: 'Active',
+        expiresAt: null,
+        maxConnections: 1,
+        activeConnections: 0,
+        isTrial: false,
+      ),
+    );
+    expect(
+      s.liveUrl(const XtreamChannel(id: '5', name: 'C')).toString(),
+      'http://a.xyz:8080/live/u/p/5.m3u8',
+    );
+  });
+
+  test('canais: resposta que não é lista vira ApiBadPayload', () async {
+    final client = clientWith((req) async {
+      if (req.url.queryParameters['action'] == null) {
+        return jsonResponse(authBody());
+      }
+      return jsonResponse({'erro': 1});
+    });
+    final session = (await client.connect(server())).dataOrNull!;
+
+    expect(await client.liveStreams(session, '1'),
+        isA<ApiBadPayload<List<XtreamChannel>>>());
+  });
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'app.dart';
@@ -20,7 +21,7 @@ Future<void> main() async {
     return;
   }
 
-  // TODO(player): MediaKit.ensureInitialized() entra aqui junto com o player.
+  MediaKit.ensureInitialized();
 
   final info = await PackageInfo.fromPlatform();
   final platform = await detectPlatform();

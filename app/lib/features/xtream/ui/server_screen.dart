@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../core/format.dart';
 import '../data/xtream_models.dart';
 import '../state/server_session_provider.dart';
+import 'live_view.dart';
 
 /// Tela provisória de um servidor: dados reais da conta e categorias por seção.
 /// O design definitivo (grades, carrosséis) vem dos mockups.
@@ -185,13 +186,17 @@ class _CategoryListState extends State<_CategoryList> {
       return const Center(child: Text('Nenhuma categoria.'));
     }
 
+    if (widget.section == XtreamSection.live) {
+      return LiveView(categories: items);
+    }
+
     return ListView.builder(
       itemCount: items.length,
       itemBuilder: (context, i) => ListTile(
         dense: true,
         title: Text(items[i].name),
-        // TODO(catálogo): abrir a lista da categoria. O onTap também torna o
-        // item focável, o que permite rolar a lista com o D-Pad.
+        // Filmes e séries ainda sem lista; o onTap vazio mantém o item focável
+        // (rolagem pelo D-Pad).
         onTap: () {},
       ),
     );

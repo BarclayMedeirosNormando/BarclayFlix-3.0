@@ -56,6 +56,15 @@ class FakeXtream implements XtreamApi {
           XtreamCategory(id: '1', name: 'Esportes'),
         ]);
   }
+
+  @override
+  Future<ApiResult<List<XtreamChannel>>> liveStreams(
+    XtreamSession session,
+    String categoryId,
+  ) async =>
+      const ApiSuccess<List<XtreamChannel>>([
+        XtreamChannel(id: '10', name: 'Canal Teste'),
+      ]);
 }
 
 void main() {
