@@ -42,7 +42,6 @@ class HomePlaceholderScreen extends StatelessWidget {
                       dense: true,
                       leading: const Icon(Icons.dns),
                       title: Text(s.apelido),
-                      subtitle: Text(s.hosts.join('  •  ')),
                     ),
                 ],
               ),
