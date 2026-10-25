@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/device/device_profile.dart';
 import '../../../core/text.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/focus_tile.dart';
+import '../../../core/ui/tv_keyboard.dart';
 import '../../favorites/data/favorites_repository.dart';
 import '../../favorites/ui/favorite_actions.dart';
 import '../../player/ui/play_launcher.dart';
@@ -46,6 +48,28 @@ class _SearchViewState extends State<SearchView> {
     });
   }
 
+  /// Teclado da TV: grava o texto e busca com o mesmo atraso da digitação normal.
+  void _setText(String text, {bool immediate = false}) {
+    _controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+    setState(() {});
+    if (immediate) {
+      _debounce?.cancel();
+      setState(() => _query = normalizeForSearch(text));
+    } else {
+      _onChanged(text);
+    }
+  }
+
+  void _typed(String ch) => _setText(_controller.text + ch);
+
+  void _backspace() {
+    final t = _controller.text;
+    if (t.isNotEmpty) _setText(t.substring(0, t.length - 1));
+  }
+
   void _setType(FavoriteType t) {
     setState(() => _type = t);
     context.read<ServerSessionProvider>().ensureSearchData(t);
@@ -62,69 +86,116 @@ class _SearchViewState extends State<SearchView> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<ServerSessionProvider>();
+    final tv = DeviceProfile.of(context).isTv;
+
+    if (tv) {
+      // TV: teclado do app à esquerda (o do sistema não abre com o controle remoto)
+      // e os resultados à direita.
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 560,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _field(tv: true),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(21, 4, 21, 0),
+                    child: TvKeyboard(
+                      onChar: _typed,
+                      onBackspace: _backspace,
+                      onClear: () => _setText('', immediate: true),
+                    ),
+                  ),
+                  _typeChips(),
+                ],
+              ),
+            ),
+          ),
+          Expanded(child: _results(provider)),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
-          child: TextField(
-            controller: _controller,
-            textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              hintText: 'Digite o nome do canal, filme ou série',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: _controller.text.isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: 'Limpar',
-                      icon: const Icon(Icons.close),
-                      onPressed: () {
-                        _controller.clear();
-                        setState(() => _query = '');
-                      },
-                    ),
-              filled: true,
-              fillColor: AppColors.surface,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: AppColors.border),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: Colors.white, width: 2),
-              ),
-            ),
-            onChanged: (t) {
-              setState(() {}); // atualiza o botão de limpar
-              _onChanged(t);
-            },
-            onSubmitted: (t) => setState(() => _query = normalizeForSearch(t)),
-          ),
-        ),
-        SizedBox(
-          height: 56,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
-            children: [
-              for (final t in FavoriteType.values)
-                Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: ChoiceChip(
-                    label: Text(switch (t) {
-                      FavoriteType.live => 'Canais',
-                      FavoriteType.vod => 'Filmes',
-                      FavoriteType.series => 'Séries',
-                    }),
-                    selected: t == _type,
-                    onSelected: (_) => _setType(t),
-                  ),
-                ),
-            ],
-          ),
-        ),
+        _field(tv: false),
+        _typeChips(),
         Expanded(child: _results(provider)),
       ],
+    );
+  }
+
+  Widget _field({required bool tv}) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
+      child: TextField(
+        controller: _controller,
+        // Celular, tablet e Windows: o campo já abre pronto para digitar (teclado na tela).
+        // TV: somente leitura (quem digita é o teclado do app) e fora da ordem de foco.
+        autofocus: !tv,
+        readOnly: tv,
+        showCursor: true,
+        canRequestFocus: !tv,
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: tv ? 'Use o teclado abaixo' : 'Digite o nome do canal, filme ou série',
+          prefixIcon: const Icon(Icons.search),
+          suffixIcon: tv || _controller.text.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: 'Limpar',
+                  icon: const Icon(Icons.close),
+                  onPressed: () {
+                    _controller.clear();
+                    setState(() => _query = '');
+                  },
+                ),
+          filled: true,
+          fillColor: AppColors.surface,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Colors.white, width: 2),
+          ),
+        ),
+        onChanged: (t) {
+          setState(() {}); // atualiza o botão de limpar
+          _onChanged(t);
+        },
+        onSubmitted: (t) => setState(() => _query = normalizeForSearch(t)),
+      ),
+    );
+  }
+
+  Widget _typeChips() {
+    return SizedBox(
+      height: 56,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+        children: [
+          for (final t in FavoriteType.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: ChoiceChip(
+                label: Text(switch (t) {
+                  FavoriteType.live => 'Canais',
+                  FavoriteType.vod => 'Filmes',
+                  FavoriteType.series => 'Séries',
+                }),
+                selected: t == _type,
+                onSelected: (_) => _setType(t),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
