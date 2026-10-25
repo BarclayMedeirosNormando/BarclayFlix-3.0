@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/device/device_profile.dart';
 import '../../../core/format.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/data/device_models.dart';
@@ -22,25 +23,27 @@ class HomePlaceholderScreen extends StatelessWidget {
     final device = context.watch<AuthProvider>().device;
     final expira = device?.expiraEm;
     final servers = device?.servers ?? const <XtreamServer>[];
+    final compact = DeviceProfile.of(context).compact;
 
     return Scaffold(
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(40, 24, 40, 24),
+          padding: compact
+              ? const EdgeInsets.fromLTRB(20, 12, 20, 16)
+              : const EdgeInsets.fromLTRB(40, 24, 40, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text.rich(TextSpan(
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
+                  Text.rich(TextSpan(
+                    style: TextStyle(fontSize: compact ? 24 : 28, fontWeight: FontWeight.w800),
                     children: [
                       TextSpan(text: 'Barclay'),
                       TextSpan(text: 'Flix', style: TextStyle(color: AppColors.accent)),
                     ],
                   )),
-                  const Spacer(),
                   IconButton(
                     tooltip: 'Configurações',
                     icon: const Icon(Icons.settings),
@@ -55,47 +58,65 @@ class HomePlaceholderScreen extends StatelessWidget {
                       MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
                     ),
                   ),
-                  const SizedBox(width: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      const Text('Dispositivo ativo',
-                          style: TextStyle(
-                              color: AppColors.accent, fontWeight: FontWeight.w700)),
-                      if (device?.clienteNome case final nome? when nome.isNotEmpty)
-                        Text('Cliente: $nome',
-                            style: const TextStyle(fontWeight: FontWeight.w600)),
-                      if (expira != null)
-                        Text('Vence em: ${formatDate(expira)}',
-                            style: const TextStyle(color: AppColors.textMuted)),
-                    ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        const Text('Dispositivo ativo',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: AppColors.accent, fontWeight: FontWeight.w700)),
+                        if (device?.clienteNome case final nome? when nome.isNotEmpty)
+                          Text('Cliente: $nome',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w600)),
+                        if (expira != null)
+                          Text('Vence em: ${formatDate(expira)}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: AppColors.textMuted)),
+                      ],
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 56),
+              SizedBox(height: compact ? 24 : 56),
               Text('Escolha o servidor',
-                  style: Theme.of(context)
-                      .textTheme
-                      .displaySmall
-                      ?.copyWith(fontWeight: FontWeight.w800)),
+                  style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                      fontWeight: FontWeight.w800, fontSize: compact ? 30 : null)),
               const SizedBox(height: 8),
-              const Text('Selecione onde você quer assistir agora.',
-                  style: TextStyle(fontSize: 18, color: AppColors.textMuted)),
-              const SizedBox(height: 40),
+              Text('Selecione onde você quer assistir agora.',
+                  style: TextStyle(
+                      fontSize: compact ? 16 : 18, color: AppColors.textMuted)),
+              SizedBox(height: compact ? 20 : 40),
               Expanded(
-                child: SingleChildScrollView(
-                  child: Wrap(
-                    spacing: 24,
-                    runSpacing: 24,
-                    children: [
-                      for (final (i, s) in servers.indexed)
-                        _ServerCard(
-                          name: s.apelido,
-                          autofocus: i == 0,
-                          onTap: () => _open(context, s),
-                        ),
-                    ],
-                  ),
+                child: LayoutBuilder(
+                  builder: (context, box) {
+                    // Celular: 2 cartões por linha ocupando a largura; demais: 280x180.
+                    final gap = compact ? 14.0 : 24.0;
+                    final w = compact ? (box.maxWidth - gap) / 2 : 280.0;
+                    final h = compact ? 118.0 : 180.0;
+                    return SingleChildScrollView(
+                      child: Wrap(
+                        spacing: gap,
+                        runSpacing: gap,
+                        children: [
+                          for (final (i, s) in servers.indexed)
+                            _ServerCard(
+                              name: s.apelido,
+                              width: w,
+                              height: h,
+                              compact: compact,
+                              autofocus: i == 0,
+                              onTap: () => _open(context, s),
+                            ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
               ),
             ],
@@ -126,9 +147,19 @@ class HomePlaceholderScreen extends StatelessWidget {
 }
 
 class _ServerCard extends StatefulWidget {
-  const _ServerCard({required this.name, required this.onTap, this.autofocus = false});
+  const _ServerCard({
+    required this.name,
+    required this.onTap,
+    required this.width,
+    required this.height,
+    required this.compact,
+    this.autofocus = false,
+  });
 
   final String name;
+  final double width;
+  final double height;
+  final bool compact;
   final VoidCallback onTap;
   final bool autofocus;
 
@@ -148,9 +179,9 @@ class _ServerCardState extends State<_ServerCard> {
       onFocusChange: (f) => setState(() => _focused = f),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 100),
-        width: 280,
-        height: 180,
-        padding: const EdgeInsets.all(24),
+        width: widget.width,
+        height: widget.height,
+        padding: EdgeInsets.all(widget.compact ? 16 : 24),
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(24),
@@ -164,19 +195,19 @@ class _ServerCardState extends State<_ServerCard> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Container(
-              width: 56,
-              height: 56,
+              width: widget.compact ? 44 : 56,
+              height: widget.compact ? 44 : 56,
               decoration: BoxDecoration(
                 color: const Color(0xFF1B2442),
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: const Icon(Icons.dns_outlined, size: 28),
+              child: Icon(Icons.dns_outlined, size: widget.compact ? 24 : 28),
             ),
             Text(
               widget.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
+              style: TextStyle(fontSize: widget.compact ? 20 : 26, fontWeight: FontWeight.w800),
             ),
           ],
         ),

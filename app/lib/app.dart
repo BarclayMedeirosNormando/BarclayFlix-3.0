@@ -2,7 +2,9 @@ import 'core/cache/list_cache.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'core/device/device_profile.dart';
 import 'core/settings/video_settings.dart';
+import 'core/telemetry/telemetry.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/data/auth_repository.dart';
 import 'features/auth/state/auth_provider.dart';
@@ -24,6 +26,7 @@ class BarclayFlixApp extends StatelessWidget {
     this.favorites = const NullFavoritesApi(),
     this.version = const NullVersionApi(),
     this.appVersion = '0.0.0',
+    this.telemetry = const NullTelemetry(),
   });
 
   final DeviceChecker checker;
@@ -41,6 +44,9 @@ class BarclayFlixApp extends StatelessWidget {
   final VersionApi version;
   final String appVersion;
 
+  /// Monitor de reprodução enviado ao painel (padrão: nenhum, usado em testes).
+  final TelemetryApi telemetry;
+
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
@@ -53,6 +59,7 @@ class BarclayFlixApp extends StatelessWidget {
         ),
         Provider<ProgressApi>.value(value: progress),
         Provider<FavoritesApi>.value(value: favorites),
+        Provider<TelemetryApi>.value(value: telemetry),
         ChangeNotifierProvider(create: (_) => AuthProvider(checker)..start()),
         ChangeNotifierProvider(create: (_) => VersionProvider(version, appVersion)..check()),
       ],
@@ -108,41 +115,53 @@ class AuthGate extends StatelessWidget {
   }
 }
 
-/// Escala responsiva: a interface é desenhada para ~1600x900 (densa, estilo TV). Em telas largas
-/// (TV, Windows) que tenham menos espaço lógico que isso, reduz tudo na mesma
-/// proporção; nunca amplia. Celular (<900 px de largura) usa o layout compacto.
+/// Escala responsiva por tipo de aparelho (celular, tablet, TV, Windows).
+/// A interface é desenhada densa (~1600x900); [DeviceProfile] define o fator
+/// de cada aparelho e este widget aplica a mesma proporção em tudo (texto,
+/// ícones, espaços). Também limita o aumento de fonte do sistema em celular/tablet.
 class _TvScale extends StatelessWidget {
   const _TvScale({required this.child});
 
   final Widget child;
 
-  static const double refWidth = 1600;
-  static const double refHeight = 900;
-
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
     final size = mq.size;
-    if (size.width < 900) return child;
-    final scale = (size.width / refWidth < size.height / refHeight
-            ? size.width / refWidth
-            : size.height / refHeight)
-        .clamp(0.5, 1.0);
-    if (scale >= 0.99) return child;
+    final profile = DeviceProfile.resolve(size);
+    final scale = profile.scale;
+
+    if (scale >= 0.99) {
+      return DeviceScope(profile: profile, child: child);
+    }
     final inner = Size(size.width / scale, size.height / scale);
-    return ClipRect(
-      child: OverflowBox(
-        alignment: Alignment.topLeft,
-        minWidth: inner.width,
-        maxWidth: inner.width,
-        minHeight: inner.height,
-        maxHeight: inner.height,
-        child: Transform.scale(
-          scale: scale,
+    final textScaler = profile.compact || profile.isTablet
+        ? mq.textScaler.clamp(maxScaleFactor: 1.1)
+        : mq.textScaler;
+    return DeviceScope(
+      profile: profile,
+      child: ClipRect(
+        child: OverflowBox(
           alignment: Alignment.topLeft,
-          child: MediaQuery(
-            data: mq.copyWith(size: inner),
-            child: SizedBox(width: inner.width, height: inner.height, child: child),
+          minWidth: inner.width,
+          maxWidth: inner.width,
+          minHeight: inner.height,
+          maxHeight: inner.height,
+          child: Transform.scale(
+            scale: scale,
+            alignment: Alignment.topLeft,
+            child: MediaQuery(
+              data: mq.copyWith(
+                size: inner,
+                // Margens do sistema (barra de status etc.) vêm em px reais;
+                // dentro do layout escalado precisam ser divididas pelo fator.
+                padding: mq.padding / scale,
+                viewPadding: mq.viewPadding / scale,
+                viewInsets: mq.viewInsets / scale,
+                textScaler: textScaler,
+              ),
+              child: SizedBox(width: inner.width, height: inner.height, child: child),
+            ),
           ),
         ),
       ),

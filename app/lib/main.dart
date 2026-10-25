@@ -5,8 +5,10 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'app.dart';
 import 'core/config/app_config.dart';
 import 'core/device/device_identity.dart';
+import 'core/device/device_profile.dart';
 import 'core/device/platform_kind.dart';
 import 'core/settings/video_settings.dart';
+import 'core/telemetry/telemetry.dart';
 import 'core/network/api_client.dart';
 import 'core/ui/config_error_app.dart';
 import 'features/auth/data/auth_repository.dart';
@@ -30,6 +32,7 @@ Future<void> main() async {
 
   final info = await PackageInfo.fromPlatform();
   final platform = await detectPlatform();
+  DeviceProfile.platform = platform;
   final api = ApiClient(baseUrl: config.apiUrl.trim(), appVersion: info.version);
 
   final identity = DeviceIdentity();
@@ -40,5 +43,6 @@ Future<void> main() async {
     favorites: FavoritesRepository(api, identity),
     version: VersionRepository(api, platform, info.version),
     appVersion: info.version,
+    telemetry: TelemetryService(api, identity),
   ));
 }

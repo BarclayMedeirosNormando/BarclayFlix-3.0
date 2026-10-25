@@ -52,6 +52,8 @@ const ACTIONS = {
   get_favorites: getFavorites_,
   set_favorite: setFavorite_,
   get_progress: getProgress_,
+  // Função embrulhada: está em outro arquivo (Telemetria.gs), que pode carregar depois deste.
+  log_event: function (p) { return logEvent_(p); },
 };
 
 /* ───────────────────────── Entrada ───────────────────────── */
