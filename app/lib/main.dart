@@ -35,7 +35,7 @@ Future<void> main() async {
   final identity = DeviceIdentity();
 
   runApp(BarclayFlixApp(
-    checker: AuthRepository(api, identity, platform),
+    checker: AuthRepository(api, identity, platform, snapshot: const SecureSnapshotStore()),
     progress: ProgressRepository(api, identity),
     favorites: FavoritesRepository(api, identity),
     version: VersionRepository(api, platform, info.version),

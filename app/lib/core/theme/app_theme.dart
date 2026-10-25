@@ -11,7 +11,22 @@ abstract final class AppColors {
   static const live = Color(0xFFFF6B6B);
 }
 
-ThemeData buildAppTheme() {
+/// Troca de tela sem animação (modo leve).
+class _NoTransitions extends PageTransitionsBuilder {
+  const _NoTransitions();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) =>
+      child;
+}
+
+ThemeData buildAppTheme({bool lite = false}) {
   final scheme = ColorScheme.fromSeed(
     seedColor: AppColors.accent,
     brightness: Brightness.dark,
@@ -25,6 +40,13 @@ ThemeData buildAppTheme() {
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
+    splashFactory: lite ? NoSplash.splashFactory : null,
+    pageTransitionsTheme: lite
+        ? const PageTransitionsTheme(builders: {
+            TargetPlatform.android: _NoTransitions(),
+            TargetPlatform.windows: _NoTransitions(),
+          })
+        : null,
     scaffoldBackgroundColor: AppColors.background,
     appBarTheme: const AppBarTheme(
       backgroundColor: AppColors.background,

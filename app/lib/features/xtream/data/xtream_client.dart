@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:http/http.dart' as http;
 
+import '../../../core/cache/list_cache.dart';
 import '../../../core/network/api_result.dart';
 import '../../auth/data/device_models.dart';
 import 'xtream_models.dart';
@@ -48,18 +50,31 @@ abstract interface class XtreamApi {
   );
 }
 
+/// Leitura das listas guardadas no aparelho (para mostrar na hora ao abrir).
+/// Opcional: quem não implementa simplesmente não tem cache.
+abstract interface class XtreamCachedLists {
+  Future<List<XtreamCategory>?> cachedCategories(XtreamSession s, XtreamSection section);
+  Future<List<XtreamChannel>?> cachedChannels(XtreamSession s, String categoryId);
+  Future<List<XtreamMovie>?> cachedMovies(XtreamSession s, String categoryId);
+  Future<List<XtreamSeries>?> cachedSeries(XtreamSession s, String categoryId);
+}
+
 /// Cliente da API Xtream Codes (`player_api.php`).
 ///
 /// - Testa os hosts do servidor em ordem e usa o primeiro que responder.
 /// - Normaliza o host (sem barra final, `http://` se faltar o esquema).
 /// - Nunca lança exceção e nunca guarda a URL (que leva usuário e senha)
 ///   em mensagens de erro.
-class XtreamClient implements XtreamApi {
+class XtreamClient implements XtreamApi, XtreamCachedLists {
   XtreamClient({
     http.Client? httpClient,
     this.authTimeout = const Duration(seconds: 12),
     this.listTimeout = const Duration(seconds: 30),
-  }) : _http = httpClient ?? http.Client();
+    ListCache? cache,
+  })  : _http = httpClient ?? http.Client(),
+        _cache = cache;
+
+  final ListCache? _cache;
 
   final Duration authTimeout;
   final Duration listTimeout;
@@ -100,55 +115,22 @@ class XtreamClient implements XtreamApi {
   Future<ApiResult<List<XtreamCategory>>> categories(
     XtreamSession session,
     XtreamSection section,
-  ) async {
-    final uri = _playerApi(session.baseUri, session.server, {'action': section.action});
-    final result = await _getJson(uri, listTimeout);
-    if (result is! ApiSuccess<Object?>) {
-      return _fail<List<XtreamCategory>>(result);
-    }
-    final data = result.data;
-    if (data is! List<dynamic>) {
-      return const ApiBadPayload<List<XtreamCategory>>('Lista de categorias inesperada.');
-    }
-    try {
-      return ApiSuccess<List<XtreamCategory>>(
-        data
-            .map((e) => XtreamCategory.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
-    } on TypeError {
-      return const ApiBadPayload<List<XtreamCategory>>('Categoria com formato inesperado.');
-    }
-  }
+  ) =>
+      _listOf(session, section.action, const {}, XtreamCategory.fromJson, 'categorias');
 
   @override
   Future<ApiResult<List<XtreamChannel>>> liveStreams(
     XtreamSession session,
     String categoryId,
-  ) async {
-    final uri = _playerApi(session.baseUri, session.server, {
-      'action': 'get_live_streams',
-      // Vazio = todos os canais (usado pela busca).
-      if (categoryId.isNotEmpty) 'category_id': categoryId,
-    });
-    final result = await _getJson(uri, listTimeout);
-    if (result is! ApiSuccess<Object?>) {
-      return _fail<List<XtreamChannel>>(result);
-    }
-    final data = result.data;
-    if (data is! List<dynamic>) {
-      return const ApiBadPayload<List<XtreamChannel>>('Lista de canais inesperada.');
-    }
-    try {
-      return ApiSuccess<List<XtreamChannel>>(
-        data
-            .map((e) => XtreamChannel.fromJson(e as Map<String, dynamic>))
-            .toList(),
+  ) =>
+      _listOf(
+        session,
+        'get_live_streams',
+        // Vazio = todos os canais (usado pela busca).
+        {if (categoryId.isNotEmpty) 'category_id': categoryId},
+        XtreamChannel.fromJson,
+        'canais',
       );
-    } on TypeError {
-      return const ApiBadPayload<List<XtreamChannel>>('Canal com formato inesperado.');
-    }
-  }
 
   @override
   Future<ApiResult<List<XtreamMovie>>> vodStreams(
@@ -264,12 +246,103 @@ class XtreamClient implements XtreamApi {
       return ApiBadPayload<List<T>>('Lista de $label inesperada.');
     }
     try {
-      return ApiSuccess<List<T>>([
-        for (final e in data) parse(e as Map<String, dynamic>),
-      ]);
+      final list = data.length > _bigList
+          ? await _mapInBackground(data, parse)
+          : [for (final e in data) parse(e as Map<String, dynamic>)];
+      _remember(_cacheKey(session, action, extra), data);
+      return ApiSuccess<List<T>>(list);
     } on TypeError {
       return ApiBadPayload<List<T>>('Item de $label com formato inesperado.');
+    } on RemoteError {
+      // Mesmo erro, mas ocorrido no processamento em segundo plano.
+      return ApiBadPayload<List<T>>('Item de $label com formato inesperado.');
     }
+  }
+
+  // ---- Cache em disco ------------------------------------------------------
+
+  /// Listas acima disso são lidas/gravadas em segundo plano (não travam a tela).
+  static const _bigList = 400;
+
+  String _cacheKey(XtreamSession s, String action, Map<String, String> extra) =>
+      '${s.server.id}_${action}_${extra['category_id'] ?? 'all'}';
+
+  /// Grava a lista no disco sem atrasar quem chamou.
+  void _remember(String key, List<dynamic> data) {
+    final cache = _cache;
+    if (cache == null) return;
+    final text = data.length > _bigList
+        ? _encodeInBackground(data)
+        : Future<String>.value(jsonEncode(data));
+    text.then((t) => cache.write(key, t)).catchError((Object _) {});
+  }
+
+  Future<List<T>?> _readCached<T>(
+    XtreamSession session,
+    String action,
+    Map<String, String> extra,
+    T Function(JsonMap) parse,
+  ) async {
+    final cache = _cache;
+    if (cache == null) return null;
+    try {
+      final text = await cache.read(_cacheKey(session, action, extra));
+      if (text == null) return null;
+      return text.length > 150000
+          ? await _decodeListInBackground(text, parse)
+          : _decodeList(text, parse);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<List<XtreamCategory>?> cachedCategories(XtreamSession s, XtreamSection section) =>
+      _readCached(s, section.action, const {}, XtreamCategory.fromJson);
+
+  @override
+  Future<List<XtreamChannel>?> cachedChannels(XtreamSession s, String categoryId) => _readCached(
+      s, 'get_live_streams', {if (categoryId.isNotEmpty) 'category_id': categoryId}, XtreamChannel.fromJson);
+
+  @override
+  Future<List<XtreamMovie>?> cachedMovies(XtreamSession s, String categoryId) async {
+    final l = await _readCached(
+        s, 'get_vod_streams', {if (categoryId.isNotEmpty) 'category_id': categoryId}, XtreamMovie.fromJson);
+    return l == null ? null : _sortNewest(l, (m) => m.added);
+  }
+
+  @override
+  Future<List<XtreamSeries>?> cachedSeries(XtreamSession s, String categoryId) async {
+    final l = await _readCached(
+        s, 'get_series', {if (categoryId.isNotEmpty) 'category_id': categoryId}, XtreamSeries.fromJson);
+    return l == null ? null : _sortNewest(l, (m) => m.added);
+  }
+
+  // Auxiliares ESTÁTICOS e sem async: o closure enviado ao isolate só captura os
+  // argumentos (capturar `this` levaria o http.Client, que não pode ser enviado).
+  static Future<List<T>> _mapInBackground<T>(List<dynamic> data, T Function(JsonMap) parse) =>
+      Isolate.run(() => [for (final e in data) parse(e as Map<String, dynamic>)]);
+
+  static Future<String> _encodeInBackground(List<dynamic> data) =>
+      Isolate.run(() => jsonEncode(data));
+
+  static Future<Object?> _jsonInBackground(String body) => Isolate.run(() => jsonDecode(body));
+
+  static List<T> _decodeList<T>(String text, T Function(JsonMap) parse) => [
+        for (final e in jsonDecode(text) as List<dynamic>) parse(e as Map<String, dynamic>),
+      ];
+
+  static Future<List<T>> _decodeListInBackground<T>(String text, T Function(JsonMap) parse) =>
+      Isolate.run(() => _decodeList(text, parse));
+
+  static List<T> _sortNewest<T>(List<T> list, int Function(T) added) {
+    if (list.every((e) => added(e) == 0)) return list;
+    final indexed = [for (var i = 0; i < list.length; i++) (i, list[i])];
+    indexed.sort((a, b) {
+      final c = added(b.$2).compareTo(added(a.$2));
+      return c != 0 ? c : a.$1.compareTo(b.$1);
+    });
+    return [for (final e in indexed) e.$2];
   }
 
   Future<ApiResult<XtreamSession>> _authenticate(XtreamServer server, Uri base) async {
@@ -314,8 +387,12 @@ class XtreamClient implements XtreamApi {
       }
       final body = utf8.decode(response.bodyBytes, allowMalformed: true);
       try {
-        return ApiSuccess<Object?>(jsonDecode(body));
+        final decoded =
+            body.length > 150000 ? await _jsonInBackground(body) : jsonDecode(body);
+        return ApiSuccess<Object?>(decoded);
       } on FormatException {
+        return const ApiBadPayload<Object?>('Resposta não é JSON.');
+      } on RemoteError {
         return const ApiBadPayload<Object?>('Resposta não é JSON.');
       }
     } on TimeoutException {

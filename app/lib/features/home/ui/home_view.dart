@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/format.dart';
+import '../../../core/settings/video_settings.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/focus_ring.dart';
 import '../../player/ui/play_launcher.dart';
@@ -133,11 +134,15 @@ class _Hero extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 22),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF2B3A67), Color(0xFF14182B), Color(0xFF0B0C12)],
-        ),
+        // Modo leve: cor lisa, sem degradê.
+        color: VideoSettings.lite.value ? const Color(0xFF14182B) : null,
+        gradient: VideoSettings.lite.value
+            ? null
+            : const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF2B3A67), Color(0xFF14182B), Color(0xFF0B0C12)],
+              ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -229,7 +234,7 @@ class _WideCardState extends State<_WideCard> {
             fit: StackFit.expand,
             children: [
               if (image != null)
-                Image.network(image, fit: BoxFit.cover, errorBuilder: (_, _, _) => const SizedBox()),
+                Image.network(image, fit: BoxFit.cover, cacheWidth: 480, filterQuality: FilterQuality.low, errorBuilder: (_, _, _) => const SizedBox()),
               Positioned(
                 left: 0,
                 right: 0,

@@ -1,6 +1,8 @@
+import 'core/cache/list_cache.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'core/settings/video_settings.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/data/auth_repository.dart';
 import 'features/auth/state/auth_provider.dart';
@@ -44,7 +46,7 @@ class BarclayFlixApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         Provider<XtreamApi>(
-          create: (_) => xtream ?? XtreamClient(),
+          create: (_) => xtream ?? XtreamClient(cache: FileListCache()),
           dispose: (_, api) {
             if (api is XtreamClient) api.dispose();
           },
@@ -54,12 +56,15 @@ class BarclayFlixApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthProvider(checker)..start()),
         ChangeNotifierProvider(create: (_) => VersionProvider(version, appVersion)..check()),
       ],
-      child: MaterialApp(
-        title: 'BarclayFlix',
-        debugShowCheckedModeBanner: false,
-        theme: buildAppTheme(),
-        builder: (context, child) => _TvScale(child: child ?? const SizedBox()),
-        home: const AuthGate(),
+      child: ValueListenableBuilder<bool>(
+        valueListenable: VideoSettings.lite,
+        builder: (context, lite, _) => MaterialApp(
+          title: 'BarclayFlix',
+          debugShowCheckedModeBanner: false,
+          theme: buildAppTheme(lite: lite),
+          builder: (context, child) => _TvScale(child: child ?? const SizedBox()),
+          home: const AuthGate(),
+        ),
       ),
     );
   }

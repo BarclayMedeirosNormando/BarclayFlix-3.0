@@ -209,16 +209,28 @@ class _SearchViewState extends State<SearchView> {
     );
   }
 
+  // Nomes já normalizados, guardados por lista (a normalização é a parte cara).
+  final Map<FavoriteType, (Object, List<String>)> _norm = {};
+
+  List<String> _names<T>(FavoriteType type, List<T> all, String Function(T) name) {
+    final cached = _norm[type];
+    if (cached != null && identical(cached.$1, all)) return cached.$2;
+    final names = [for (final e in all) normalizeForSearch(name(e))];
+    _norm[type] = (all, names);
+    return names;
+  }
+
   List<_Row> _search(ServerSessionProvider provider) {
-    bool hit(String name) => normalizeForSearch(name).contains(_query);
     final rows = <_Row>[];
 
     switch (_type) {
       case FavoriteType.live:
         final all = provider.channels('').items ?? const <XtreamChannel>[];
+        final names = _names<XtreamChannel>(FavoriteType.live, all, (c) => c.name);
         final found = <XtreamChannel>[];
-        for (final c in all) {
-          if (!hit(c.name)) continue;
+        for (var k = 0; k < all.length; k++) {
+          if (!names[k].contains(_query)) continue;
+          final c = all[k];
           found.add(c);
           if (found.length >= kMaxSearchResults) break;
         }
@@ -234,8 +246,10 @@ class _SearchViewState extends State<SearchView> {
         }
       case FavoriteType.vod:
         final all = provider.movies('').data ?? const <XtreamMovie>[];
-        for (final m in all) {
-          if (!hit(m.name)) continue;
+        final names = _names<XtreamMovie>(FavoriteType.vod, all, (m) => m.name);
+        for (var k = 0; k < all.length; k++) {
+          if (!names[k].contains(_query)) continue;
+          final m = all[k];
           rows.add(_Row(
             FavoriteEntry(type: FavoriteType.vod, id: m.id, name: m.name, imageUrl: m.posterUrl),
             () => launchPlayer(context, [provider.movieItem(m)]),
@@ -244,8 +258,10 @@ class _SearchViewState extends State<SearchView> {
         }
       case FavoriteType.series:
         final all = provider.seriesOf('').data ?? const <XtreamSeries>[];
-        for (final s in all) {
-          if (!hit(s.name)) continue;
+        final names = _names<XtreamSeries>(FavoriteType.series, all, (s) => s.name);
+        for (var k = 0; k < all.length; k++) {
+          if (!names[k].contains(_query)) continue;
+          final s = all[k];
           rows.add(_Row(
             FavoriteEntry(type: FavoriteType.series, id: s.id, name: s.name, imageUrl: s.coverUrl),
             () => Navigator.of(context).push(MaterialPageRoute<void>(

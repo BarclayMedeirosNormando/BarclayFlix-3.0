@@ -376,6 +376,8 @@ class ChannelLogo extends StatelessWidget {
         u,
         width: size,
         height: size,
+        cacheWidth: (size * 2).round(),
+        filterQuality: FilterQuality.low,
         fit: BoxFit.contain,
         errorBuilder: (_, _, _) => fallback,
       ),
