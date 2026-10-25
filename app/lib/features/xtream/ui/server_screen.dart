@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/device/device_profile.dart';
 import '../../../core/format.dart';
 import '../../../core/theme/app_theme.dart';
 import '../data/xtream_models.dart';
@@ -157,14 +158,15 @@ class _NavItemState extends State<_NavItem> {
 
   @override
   Widget build(BuildContext context) {
+    final compact = DeviceProfile.of(context).compact;
     return Padding(
-      padding: const EdgeInsets.only(right: 8),
+      padding: EdgeInsets.only(right: compact ? 2 : 8),
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
         onTap: widget.onTap,
         onFocusChange: (f) => setState(() => _focused = f),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16, vertical: 8),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
@@ -185,7 +187,7 @@ class _NavItemState extends State<_NavItem> {
             child: Text(
               widget.label,
               style: TextStyle(
-                fontSize: 18,
+                fontSize: compact ? 17 : 18,
                 fontWeight: FontWeight.w600,
                 color: widget.selected ? Colors.white : AppColors.textMuted,
               ),
@@ -321,7 +323,8 @@ class _AccountInfo extends StatelessWidget {
       'v${context.read<VersionProvider>().current}',
     ];
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      padding: EdgeInsets.fromLTRB(
+          DeviceProfile.of(context).compact ? 14 : 16, 8, 16, 6),
       child: Align(
         alignment: Alignment.centerLeft,
         child: Text(

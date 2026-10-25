@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/device/device_profile.dart';
 import '../../../core/text.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/focus_ring.dart';
@@ -69,17 +70,19 @@ class _CatalogViewState extends State<CatalogView> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<ServerSessionProvider>();
+    final compact = DeviceProfile.of(context).compact;
+    final edge = compact ? 14.0 : 24.0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          height: 64,
+          height: compact ? 56 : 64,
           child: Row(
             children: [
               Expanded(
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.fromLTRB(24, 8, 12, 8),
+                  padding: EdgeInsets.fromLTRB(edge, 8, 12, 8),
                   itemCount: _cats.length,
                   itemBuilder: (context, i) {
                     final c = _cats[i];
@@ -104,7 +107,7 @@ class _CatalogViewState extends State<CatalogView> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(0, 8, 24, 8),
+                padding: EdgeInsets.fromLTRB(0, 8, edge, 8),
                 child: _Chip(
                   label: 'A–Z',
                   icon: Icons.sort_by_alpha,
@@ -190,13 +193,20 @@ class _CatalogViewState extends State<CatalogView> {
     if (!loaded) return const Center(child: CircularProgressIndicator());
     if (posters.isEmpty) return const Center(child: Text('Nada nesta categoria.'));
 
+    final profile = DeviceProfile.of(context);
+    // Tamanho dos pôsteres por tipo de aparelho (celular: 3 colunas; TV/PC: maiores).
+    final (double maxW, double h, double gap, double edge) = switch (profile.kind) {
+      DeviceClass.phone => (150.0, 268.0, 12.0, 14.0),
+      DeviceClass.tablet => (180.0, 300.0, 16.0, 20.0),
+      _ => (200.0, 320.0, 20.0, 24.0),
+    };
     return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 200,
-        mainAxisExtent: 320,
-        mainAxisSpacing: 20,
-        crossAxisSpacing: 20,
+      padding: EdgeInsets.fromLTRB(edge, 8, edge, 24),
+      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: maxW,
+        mainAxisExtent: h,
+        mainAxisSpacing: gap,
+        crossAxisSpacing: gap,
       ),
       itemCount: posters.length,
       itemBuilder: (context, i) => _PosterCard(data: posters[i], autofocus: i == 0),

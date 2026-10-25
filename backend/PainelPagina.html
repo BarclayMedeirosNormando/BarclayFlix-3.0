@@ -65,8 +65,9 @@
 <div id="msg"></div>
 
 <script>
-let CURS = null, KEY = '', DATA = {clients:[], pendentes:[], servers:[]}, TAB = 'clientes', CUR = null;
-const TABS = [['clientes','Clientes'],['pendentes','Aparelhos novos'],['servidores','Servidores']];
+let CURS = null, KEY = '', DATA = {clients:[], pendentes:[], servers:[]}, TAB = 'monitor', CUR = null;
+const TABS = [['monitor','Monitor'],['clientes','Clientes'],['pendentes','Aparelhos novos'],['servidores','Servidores']];
+let MON = null, MONTOP = 'live', MONBUSY = false;
 const $ = id => document.getElementById(id);
 
 function run(fn, ...args) {
@@ -109,12 +110,20 @@ function ago(iso) {
 }
 function render() {
   $('chips').innerHTML = TABS.map(([k, n]) => {
+    if (k === 'monitor') {
+      const bad = MON ? MON.servers.filter(x => x.alerta).length : 0;
+      return `<button class="chip ${k === TAB ? 'on' : ''}" onclick="TAB='monitor';render()">${bad ? '⚠ ' : ''}${n}${bad ? ' (' + bad + ')' : ''}</button>`;
+    }
     const c = k === 'clientes' ? DATA.clients.length : k === 'pendentes' ? DATA.pendentes.length : DATA.servers.length;
     return `<button class="chip ${k === TAB ? 'on' : ''}" onclick="TAB='${k}';render()">${n} (${c})</button>`;
   }).join('') + `<button class="chip" onclick="openClient(null)">+ Novo cliente</button>`;
   const q = $('q').value.trim().toLowerCase();
+  $('q').style.display = TAB === 'monitor' ? 'none' : 'block';
   let html = '';
-  if (TAB === 'clientes') {
+  if (TAB === 'monitor') {
+    if (!MON) loadMonitor();
+    html = renderMonitor();
+  } else if (TAB === 'clientes') {
     const list = DATA.clients.filter(c => !q || (c.id + ' ' + c.aparelhos.map(a => a.codigo).join(' ')).toLowerCase().includes(q));
     html = list.map(c => `
       <div class="card" onclick="openClient(DATA.clients[${DATA.clients.indexOf(c)}].id)">
@@ -140,6 +149,82 @@ function render() {
       </div>`).join('');
   }
   $('list').innerHTML = html || '<div class="sub" style="padding:24px 4px">Nada por aqui.</div>';
+}
+
+
+/* ───────── Monitor ───────── */
+const fmtS = s => { s = Math.round(s || 0); if (s < 60) return s + ' s'; const m = Math.round(s / 60); if (m < 60) return m + ' min'; const h = Math.floor(m / 60); return h + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : ''); };
+const pct = r => Math.round((r || 0) * 100) + '%';
+const TIPO = {live: 'Canal', vod: 'Filme', episode: 'Episódio'};
+const EST = {assistindo: ['Assistindo', 'good'], abrindo: ['Abrindo', 'warn'], travando: ['Travando', 'err']};
+function fmtDt(ms) { const d = new Date(ms); const p = n => String(n).padStart(2, '0'); return p(d.getDate()) + '/' + p(d.getMonth() + 1) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
+async function loadMonitor() {
+  if (MONBUSY) return; MONBUSY = true;
+  try { MON = await run('adminMonitor'); if (TAB === 'monitor') render(); }
+  catch (e) { toast(e.message, 'bad'); if (!MON) MON = {agora: [], servers: [], problemas: [], tops: {live: [], vod: [], episode: []}, resumo: {assistindo: 0, reproducoes24h: 0, clientes24h: 0, segundos24h: 0, semDados: true}, limiar: {taxa: .2, minimo: 5}}; }
+  finally { MONBUSY = false; }
+}
+function srvLine(label, st) {
+  if (!st.n) return `<div class="sub">${label}: sem reproduções</div>`;
+  return `<div class="sub">${label}: ${st.n} tentativas · ${st.fail} não abriram · ${st.drop} quedas · ${st.trav} travando · <b>${pct(st.rate)}</b> de problema</div>`;
+}
+function renderMonitor() {
+  if (!MON) return '<div class="sub" style="padding:24px 4px">Carregando…</div>';
+  const m = MON, r = m.resumo;
+  const bad = m.servers.filter(s => s.alerta);
+  let h = '';
+  if (bad.length) h += `<div class="card alert"><div class="name">⚠ Servidor com problema</div>${bad.map(s =>
+    `<div class="sub"><b>${esc(s.apelido)}</b>: ${pct(s.h1.rate)} de falhas na última hora (${s.h1.fail + s.h1.drop} de ${s.h1.n} tentativas)</div>`).join('')}</div>`;
+  h += `<div class="kpis">
+    <div class="kpi"><b>${r.assistindo}</b><span>assistindo agora</span></div>
+    <div class="kpi"><b>${r.clientes24h}</b><span>clientes em 24 h</span></div>
+    <div class="kpi"><b>${fmtS(r.segundos24h)}</b><span>assistido em 24 h</span></div></div>`;
+  if (r.semDados) h += `<div class="sub" style="margin-bottom:8px">Ainda sem dados. Eles aparecem quando clientes com o app 3.0.5 ou mais novo assistirem algo.</div>`;
+  h += `<div class="row"><h2>Assistindo agora</h2><button class="chip" onclick="MON=null;render()">Atualizar</button></div>`;
+  h += m.agora.length ? m.agora.map(a => { const [t, k] = EST[a.estado] || [a.estado, '']; return `
+    <div class="card"><div class="row"><div class="name">${esc(a.cliente)}</div><span class="tag ${k}">${t}</span></div>
+    <div class="sub">${TIPO[a.tipo] || a.tipo}: ${esc(a.nome)}</div>
+    <div class="sub">${esc(a.servidor)} · há ${fmtS((m.geradoEm - a.desde) / 1000)}${a.travadas >= 1 ? ' · ' + a.travadas + ' travada(s)' : ''}</div></div>`; }).join('')
+    : '<div class="sub">Ninguém assistindo no momento.</div>';
+  h += `<h2>Saúde dos servidores</h2>`;
+  h += m.servers.map(s => {
+    const tag = s.alerta ? ['Com problema', 'err'] : s.semDados ? ['Poucos dados', 'warn'] : ['Normal', 'good'];
+    const w = Math.min(100, Math.round(s.h1.rate * 100));
+    return `<div class="card ${s.alerta ? 'alert' : ''}"><div class="row"><div class="name">${esc(s.apelido)}</div><span class="tag ${tag[1]}">${tag[0]}</span></div>
+      ${srvLine('Última hora', s.h1)}${srvLine('24 horas', s.h24)}
+      <div class="bar ${s.alerta ? 'bad' : ''}"><i style="width:${w}%"></i></div></div>`;
+  }).join('') || '<div class="sub">Nenhum servidor cadastrado.</div>';
+  h += `<div class="sub">Alerta quando ${pct(m.limiar.taxa)} ou mais das tentativas falham na última hora (mínimo de ${m.limiar.minimo} tentativas).</div>`;
+  h += `<h2>Canais e filmes com problema (24 h)</h2>`;
+  h += m.problemas.length ? m.problemas.map(p => `
+    <div class="card"><div class="name">${esc(p.nome)}</div>
+    <div class="sub">${TIPO[p.tipo] || p.tipo} · ${esc(p.servidor)}</div>
+    <div class="sub">${p.tentativas} tentativas · ${p.falhas} não abriram · ${p.quedas} quedas · ${p.travadas} travando</div></div>`).join('')
+    : '<div class="sub">Nenhum problema repetido nas últimas 24 horas.</div>';
+  h += `<h2>Mais assistidos (7 dias)</h2><div class="chips">${[['live', 'Canais'], ['vod', 'Filmes'], ['episode', 'Episódios']].map(([k, n]) =>
+    `<button class="chip ${k === MONTOP ? 'on' : ''}" onclick="MONTOP='${k}';render()">${n}</button>`).join('')}</div>`;
+  const top = m.tops[MONTOP] || [];
+  h += top.length ? top.map((t, i) => `<div class="card"><div class="row"><div class="name">${i + 1}. ${esc(t.nome)}</div></div>
+    <div class="sub">${fmtS(t.segundos)} assistidos · ${t.vezes} vez(es) · ${t.clientes} cliente(s)</div></div>`).join('')
+    : '<div class="sub">Sem dados ainda.</div>';
+  return h;
+}
+setInterval(() => {
+  if (TAB === 'monitor' && KEY && !document.hidden && !$('sheet').classList.contains('show')) loadMonitor();
+}, 30000);
+
+async function openActivity(id) {
+  let h;
+  try { h = await run('adminClientHistory', id); } catch (e) { toast(e.message, 'bad'); return; }
+  const kind = {ok: 'good', travando: 'warn', falhou: 'err', caiu: 'err', abandonou: ''};
+  $('panel').innerHTML = `
+    <div class="row"><div class="name">Atividade · ${esc(id)}</div></div>
+    <div class="sub">Últimos 7 dias: ${h.reproducoes} reprodução(ões) · ${fmtS(h.segundos)} assistidos · ${h.falhas} não abriram · ${h.quedas} quedas</div>
+    ${h.lista.length ? h.lista.map(x => `<div class="card"><div class="row"><div class="name">${esc(x.nome)}</div><span class="tag ${kind[x.resultado] || ''}">${x.resultado}</span></div>
+      <div class="sub">${TIPO[x.tipo] || x.tipo} · ${esc(x.servidor)}</div>
+      <div class="sub">${fmtDt(x.inicio)} · ${fmtS(x.segundos)}${x.travadas ? ' · ' + x.travadas + ' travada(s)' : ''}</div></div>`).join('')
+      : '<div class="sub" style="padding:16px 0">Sem atividade registrada (o cliente precisa estar com o app 3.0.5 ou mais novo).</div>'}
+    <div class="btns"><button class="btn" onclick="closeSheet()">Fechar</button></div>`;
 }
 
 async function openClient(id, presetDevice) {
@@ -175,6 +260,7 @@ async function openClient(id, presetDevice) {
     <div class="btns">
       <button class="btn pri" onclick="save()">${CUR ? 'Salvar' : 'Cadastrar e liberar'}</button>
       ${CUR ? `<button class="btn" onclick="renew()">Renovar +30 dias</button>` : ''}
+      ${CUR ? `<button class="btn" onclick="openActivity(CUR.id)">Atividade</button>` : ''}
       ${CUR && CUR.status === 'bloqueado' ? `<button class="btn" onclick="setStatus('ativo')">Desbloquear</button>` : ''}
       ${CUR && CUR.status !== 'bloqueado' && CUR.status !== 'sem_aparelho' ? `<button class="btn bad" onclick="setStatus('bloqueado')">Bloquear</button>` : ''}
       <button class="btn" onclick="closeSheet()">Fechar</button>

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +8,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../../core/format.dart';
 import '../../../core/settings/video_settings.dart';
+import '../../../core/telemetry/telemetry.dart';
 import '../../xtream/data/xtream_models.dart' show EpgEntry;
 import '../data/play_item.dart';
 
@@ -33,6 +35,8 @@ class PlayerScreen extends StatefulWidget {
     this.initialIndex = 0,
     this.onProgress,
     this.epgLoader,
+    this.telemetry,
+    this.serverId = '',
   });
 
   final List<PlayItem> items;
@@ -41,6 +45,10 @@ class PlayerScreen extends StatefulWidget {
 
   /// Busca a programação de um canal ao vivo (opcional).
   final Future<List<EpgEntry>> Function(String streamId)? epgLoader;
+
+  /// Envia ao painel como a reprodução está indo (abriu, travou, caiu...). Opcional.
+  final TelemetryApi? telemetry;
+  final String serverId;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -84,6 +92,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _buffering = true;
   bool _showInfo = true;
 
+  // Telemetria da reprodução atual (cada abertura de item é uma reprodução).
+  _Playback? _pb;
+  Timer? _openTimeout;
+  Timer? _beatTimer;
+  StreamSubscription<bool>? _playingSub;
+  DateTime _seekedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
   PlayItem get _item => widget.items[_index];
 
   @override
@@ -91,16 +106,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _player.stream.error.listen((e) {
+      _failPlayback('erro');
       if (mounted) setState(() => _error = 'Não foi possível reproduzir este item.');
     });
     _completedSub = _player.stream.completed.listen((done) {
+      // Canal ao vivo "terminar" = a transmissão caiu.
+      if (done && _pb?.item.isLive == true) _failPlayback('fim');
       if (done && mounted) _onCompleted();
     });
     _player.stream.buffering.listen((b) {
       if (mounted) setState(() => _buffering = b);
+      _trackBuffering(b);
       if (b) _onStall();
     });
+    _playingSub = _player.stream.playing.listen((_) => _syncWatch());
     _saveTimer = Timer.periodic(const Duration(seconds: 30), (_) => _report());
+    _beatTimer = Timer.periodic(const Duration(seconds: 120), (_) => _heartbeat());
     _open();
   }
 
@@ -207,6 +228,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _open() async {
     _cancelNext();
+    _beginPlayback();
     _stalls.clear();
     _boosted = false;
     setState(() {
@@ -225,8 +247,102 @@ class _PlayerScreenState extends State<PlayerScreen> {
       );
     } catch (_) {
       // Sem detalhes: a URL leva usuário e senha.
+      _failPlayback('erro');
       if (mounted) setState(() => _error = 'Não foi possível reproduzir este item.');
     }
+  }
+
+  // ---- Telemetria (painel) ---------------------------------------------------
+
+  String _newSessionId() =>
+      '${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}${math.Random().nextInt(1 << 20).toRadixString(36)}';
+
+  void _tlog(_Playback pb, String name, {int v1 = 0, int v2 = 0, String detail = ''}) {
+    try {
+      widget.telemetry?.log(TelemetryEvent(
+        session: pb.id,
+        serverId: widget.serverId,
+        name: name,
+        type: pb.item.kind.name,
+        itemId: pb.item.progressId ?? pb.item.epgId ?? '',
+        title: pb.item.title,
+        v1: v1,
+        v2: v2,
+        detail: detail,
+      ));
+    } catch (_) {}
+  }
+
+  /// Nova reprodução: encerra a anterior, avisa o início e arma o prazo de abertura.
+  void _beginPlayback() {
+    _endPlayback();
+    if (widget.telemetry == null) return;
+    final pb = _pb = _Playback(_newSessionId(), _item);
+    _tlog(pb, 'start');
+    _openTimeout?.cancel();
+    _openTimeout = Timer(Duration(seconds: pb.item.isLive ? 20 : 30), () {
+      if (identical(_pb, pb) && !pb.ok) _failPlayback('timeout');
+    });
+  }
+
+  /// Não abriu (antes do `ok`) ou caiu (depois do `ok`). Conta uma vez por reprodução.
+  void _failPlayback(String detail) {
+    final pb = _pb;
+    if (pb == null || pb.failed || pb.ended) return;
+    pb.failed = true;
+    _openTimeout?.cancel();
+    _tlog(pb, pb.ok ? 'drop' : 'fail', detail: detail);
+    _syncWatch();
+  }
+
+  void _endPlayback() {
+    final pb = _pb;
+    if (pb == null || pb.ended) return;
+    pb.ended = true;
+    _openTimeout?.cancel();
+    pb.watch.stop();
+    _tlog(pb, 'stop',
+        v1: pb.watch.elapsed.inSeconds,
+        v2: pb.stalls,
+        detail: pb.ok || pb.failed ? '' : 'abandon');
+    _pb = null;
+  }
+
+  /// Primeiro "parou de carregar" = abriu. Depois, cada parada conta como travada
+  /// (menos as causadas por pular no vídeo).
+  void _trackBuffering(bool buffering) {
+    final pb = _pb;
+    if (pb == null || pb.ended) return;
+    if (!buffering) {
+      if (!pb.ok && !pb.failed) {
+        pb.ok = true;
+        _openTimeout?.cancel();
+        _tlog(pb, 'ok', v1: DateTime.now().difference(pb.started).inSeconds);
+      }
+    } else if (pb.ok && !pb.failed) {
+      if (DateTime.now().difference(_seekedAt) < const Duration(seconds: 4)) return;
+      pb.stalls++;
+      if (pb.stalls == 3) _tlog(pb, 'stall', v1: pb.stalls);
+    }
+    _syncWatch();
+  }
+
+  /// Conta tempo assistido só com o vídeo rodando de verdade.
+  void _syncWatch() {
+    final pb = _pb;
+    if (pb == null) return;
+    final watching = pb.ok && !pb.failed && !pb.ended && _player.state.playing && !_buffering;
+    if (watching && !pb.watch.isRunning) {
+      pb.watch.start();
+    } else if (!watching && pb.watch.isRunning) {
+      pb.watch.stop();
+    }
+  }
+
+  void _heartbeat() {
+    final pb = _pb;
+    if (pb == null || !pb.ok || pb.failed || pb.ended) return;
+    _tlog(pb, 'hb', v1: pb.watch.elapsed.inSeconds, v2: pb.stalls);
   }
 
   void _go(int delta) {
@@ -242,6 +358,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     var target = _player.state.position + Duration(seconds: seconds);
     if (target < Duration.zero) target = Duration.zero;
     if (dur > Duration.zero && target > dur) target = dur;
+    _seekedAt = DateTime.now();
     _player.seek(target);
     if (!fromKey) return _poke();
     // Pelo controle: só um aviso discreto, sem abrir a barra (assim as setas
@@ -342,10 +459,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _saveTimer?.cancel();
+    _beatTimer?.cancel();
+    _openTimeout?.cancel();
     _hideTimer?.cancel();
     _hintTimer?.cancel();
     _nextTimer?.cancel();
     _completedSub?.cancel();
+    _playingSub?.cancel();
+    _endPlayback();
+    widget.telemetry?.flush();
     _report();
     _focus.dispose();
     _playFocus.dispose();
@@ -409,7 +531,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (!live) _ProgressBar(player: _player, onTouch: _poke),
+          if (!live)
+            _ProgressBar(
+              player: _player,
+              onTouch: () {
+                _seekedAt = DateTime.now();
+                _poke();
+              },
+            ),
           Wrap(
             alignment: WrapAlignment.center,
             crossAxisAlignment: WrapCrossAlignment.center,
@@ -812,4 +941,22 @@ class _NextUp extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Estado de telemetria de UMA abertura de item (canal, filme ou episódio).
+class _Playback {
+  _Playback(this.id, this.item);
+
+  final String id;
+  final PlayItem item;
+  final DateTime started = DateTime.now();
+  final Stopwatch watch = Stopwatch();
+
+  /// Abriu (primeiro quadro pronto).
+  bool ok = false;
+
+  /// Já reportado como `fail` (não abriu) ou `drop` (caiu).
+  bool failed = false;
+  bool ended = false;
+  int stalls = 0;
 }
