@@ -1,5 +1,7 @@
 import 'package:barclayflix/core/network/api_result.dart';
 import 'package:barclayflix/features/auth/data/device_models.dart';
+import 'package:barclayflix/features/version/data/version_repository.dart';
+import 'package:barclayflix/features/version/state/version_provider.dart';
 import 'package:barclayflix/features/xtream/data/xtream_client.dart';
 import 'package:barclayflix/features/xtream/data/xtream_models.dart';
 import 'package:barclayflix/features/xtream/state/server_session_provider.dart';
@@ -46,8 +48,13 @@ class _Api with UnusedXtreamMethods implements XtreamApi {
 }
 
 Widget _app(XtreamApi api) => MaterialApp(
-      home: ChangeNotifierProvider(
-        create: (_) => ServerSessionProvider(api, _server)..connect(),
+      home: MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => VersionProvider(const NullVersionApi(), '3.0.0')),
+          ChangeNotifierProvider(
+            create: (_) => ServerSessionProvider(api, _server)..connect(),
+          ),
+        ],
         child: const ServerScreen(),
       ),
     );

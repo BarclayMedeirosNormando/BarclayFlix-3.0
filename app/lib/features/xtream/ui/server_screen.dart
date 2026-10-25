@@ -5,7 +5,11 @@ import '../../../core/format.dart';
 import '../../../core/theme/app_theme.dart';
 import '../data/xtream_models.dart';
 import '../state/server_session_provider.dart';
+import '../../favorites/ui/favorites_view.dart';
 import '../../home/ui/home_view.dart';
+import '../../search/ui/search_view.dart';
+import '../../settings/ui/settings_view.dart';
+import '../../version/state/version_provider.dart';
 import 'catalog_view.dart';
 import 'live_view.dart';
 
@@ -14,7 +18,10 @@ enum ServerTab {
   home('Início', null),
   live('Ao vivo', XtreamSection.live),
   vod('Filmes', XtreamSection.vod),
-  series('Séries', XtreamSection.series);
+  series('Séries', XtreamSection.series),
+  search('Busca', null),
+  list('Minha lista', null),
+  settings('Ajustes', null);
 
   const ServerTab(this.label, this.section);
 
@@ -281,9 +288,16 @@ class _ReadyBodyState extends State<_ReadyBody> {
         _Header(selected: _tab, onSelect: _select),
         _AccountInfo(info: widget.session.userInfo),
         Expanded(
-          child: _tab == ServerTab.home
-              ? HomeView(onOpenLive: () => _select(ServerTab.live))
-              : _CategoryList(key: ValueKey(_tab), section: _tab.section!),
+          child: switch (_tab) {
+            ServerTab.home => HomeView(onOpenLive: () => _select(ServerTab.live)),
+            ServerTab.search => const SearchView(),
+            ServerTab.list => const FavoritesView(),
+            ServerTab.settings => SettingsView(
+                serverName: context.read<ServerSessionProvider>().server.apelido,
+                onChangeServer: () => Navigator.of(context).maybePop(),
+              ),
+            _ => _CategoryList(key: ValueKey(_tab), section: _tab.section!),
+          },
         ),
       ],
     );
@@ -304,6 +318,7 @@ class _AccountInfo extends StatelessWidget {
       expires == null ? 'Sem vencimento' : 'Vence em ${formatDate(expires)}',
       'Conexões: ${info.activeConnections}/${info.maxConnections}',
       if (info.isTrial) 'Teste',
+      'v${context.read<VersionProvider>().current}',
     ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),

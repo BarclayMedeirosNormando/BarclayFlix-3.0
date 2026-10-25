@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/focus_tile.dart';
+import '../../favorites/data/favorites_repository.dart';
+import '../../favorites/ui/favorite_actions.dart';
 import '../../player/ui/play_launcher.dart';
 import '../data/xtream_models.dart';
 import '../state/server_session_provider.dart';
@@ -165,6 +167,15 @@ class _LiveViewState extends State<LiveView> {
         final ch = channels[i];
         return FocusTile(
           onFocus: () => setState(() => _focusedChannel = ch),
+          onLongPress: () => toggleFavoriteWithMessage(
+            context,
+            FavoriteEntry(
+              type: FavoriteType.live,
+              id: ch.id,
+              name: ch.name,
+              imageUrl: ch.iconUrl,
+            ),
+          ),
           onTap: () => launchPlayer(
             context,
             [for (final c in channels) provider.channelItem(c)],
@@ -189,6 +200,8 @@ class _LiveViewState extends State<LiveView> {
                   style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                 ),
               ),
+              if (provider.isFavorite(FavoriteType.live, ch.id))
+                const Icon(Icons.favorite, size: 20, color: AppColors.accent),
             ],
           ),
         );
@@ -228,15 +241,59 @@ class _Column extends StatelessWidget {
   }
 }
 
-class _InfoPanel extends StatelessWidget {
+class _InfoPanel extends StatefulWidget {
   const _InfoPanel({required this.channel, required this.category});
 
   final XtreamChannel? channel;
   final XtreamCategory category;
 
   @override
+  State<_InfoPanel> createState() => _InfoPanelState();
+}
+
+class _InfoPanelState extends State<_InfoPanel> {
+  String? _loadedFor;
+
+  void _maybeLoad() {
+    final id = widget.channel?.id;
+    if (id == null || id == _loadedFor) return;
+    _loadedFor = id;
+    context.read<ServerSessionProvider>().epgFor(id);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _maybeLoad();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _InfoPanel old) {
+    super.didUpdateWidget(old);
+    _maybeLoad();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final ch = channel;
+    final ch = widget.channel;
+    final category = widget.category;
+    final epg = ch == null
+        ? const <EpgEntry>[]
+        : context.watch<ServerSessionProvider>().epgCached(ch.id);
+    final now = DateTime.now();
+    EpgEntry? current;
+    EpgEntry? next;
+    for (final e in epg) {
+      if (e.isLiveAt(now)) {
+        current = e;
+      } else if (e.start.isAfter(now) && next == null) {
+        next = e;
+      }
+    }
+    String hm(DateTime d) =>
+        '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -246,7 +303,7 @@ class _InfoPanel extends StatelessWidget {
       ),
       child: ch == null
           ? const Text(
-              'Use as setas para escolher um canal e OK para assistir.',
+              'Use as setas para escolher um canal e OK para assistir. Segure OK (ou toque e segure) para guardar na Minha lista.',
               style: TextStyle(color: AppColors.textMuted, fontSize: 16),
             )
           : Column(
@@ -269,6 +326,24 @@ class _InfoPanel extends StatelessWidget {
                             color: AppColors.live, fontWeight: FontWeight.w700, fontSize: 13)),
                   ],
                 ),
+                if (current != null) ...[
+                  const SizedBox(height: 16),
+                  Text('Agora (até ${hm(current.end)})',
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                  Text(current.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                ],
+                if (next != null) ...[
+                  const SizedBox(height: 10),
+                  Text('Depois (${hm(next.start)})',
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                  Text(next.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 15)),
+                ],
               ],
             ),
     );

@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BarclayFlix Admin</title>
+<style>
+  :root{--bg:#07080A;--sf:#111318;--bd:#262A33;--ac:#FFB224;--on:#1A1200;--mut:#A3AAB8;--tx:#F4F5F7;--ok:#4ADE80;--bad:#FF6B6B}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{position:sticky;top:0;z-index:5;background:var(--bg);padding:14px 16px 8px;border-bottom:1px solid var(--bd)}
+  h1{margin:0 0 10px;font-size:22px;font-weight:800}h1 span{color:var(--ac)}
+  textarea{width:100%;border-radius:12px;border:1px solid var(--bd);background:var(--sf);color:var(--tx);padding:12px 14px;font:inherit}
+  input,select{width:100%;height:46px;border-radius:12px;border:1px solid var(--bd);background:var(--sf);color:var(--tx);padding:0 14px;font:inherit}
+  label{display:block;margin:12px 0 4px;font-size:13px;color:var(--mut);font-weight:700}
+  .chips{display:flex;gap:8px;overflow-x:auto;padding:10px 0 4px}
+  .chip{flex:none;height:36px;padding:0 16px;border-radius:18px;border:1px solid var(--bd);background:var(--sf);color:var(--tx);font:inherit;font-weight:700;font-size:14px}
+  .chip.on{background:var(--ac);color:var(--on);border-color:var(--ac)}
+  main{padding:12px 16px 90px}
+  .card{background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:14px;margin-bottom:10px}
+  .row{display:flex;justify-content:space-between;gap:8px;align-items:center}
+  .name{font-weight:800;font-size:17px}.sub{color:var(--mut);font-size:13px;margin-top:2px}
+  .tag{font-size:12px;font-weight:800;padding:3px 10px;border-radius:10px;background:#262A33}
+  .tag.ativo{color:var(--ok)}.tag.nao_registrado{color:var(--ac)}.tag.bloqueado,.tag.expirado{color:var(--bad)}
+  button{font:inherit;cursor:pointer}
+  .btn{height:46px;border-radius:12px;border:0;padding:0 18px;font-weight:800;background:#262A33;color:var(--tx)}
+  .btn.pri{background:var(--ac);color:var(--on)}.btn.bad{color:var(--bad)}
+  .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.btns .btn{flex:1;min-width:120px}
+  .sheet{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;z-index:10}
+  .sheet.show{display:block}
+  .panel{position:absolute;left:0;right:0;bottom:0;max-height:92vh;overflow:auto;background:var(--bg);border-top:1px solid var(--bd);border-radius:20px 20px 0 0;padding:18px 16px 28px}
+  .srv{border:1px solid var(--bd);border-radius:12px;padding:10px 12px;margin-top:10px;background:var(--sf)}
+  .srv .t{display:flex;align-items:center;gap:10px;font-weight:700}
+  .srv .t input{width:22px;height:22px}
+  .srv .f{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+  .srv .f input{height:42px}
+  #msg{position:fixed;left:16px;right:16px;bottom:16px;z-index:20;background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:12px 14px;display:none}
+  #msg.bad{border-color:var(--bad)}#msg.ok{border-color:var(--ok)}
+  .center{max-width:420px;margin:18vh auto 0;padding:0 16px}
+  label.dev{display:flex;align-items:center;gap:12px;margin:8px 0 0;padding:10px 12px;border:1px solid var(--bd);border-radius:12px;background:var(--sf);color:var(--tx);font-size:15px;font-weight:600}
+  label.dev input{width:22px;height:22px}label.dev small{color:var(--mut);font-weight:400}
+</style>
+</head>
+<body>
+<div id="login" class="center" style="display:none">
+  <h1>Barclay<span>Flix</span> Admin</h1>
+  <label>Chave de administrador</label>
+  <input id="key" type="password" autocomplete="current-password">
+  <div class="btns"><button class="btn pri" onclick="doLogin()">Entrar</button></div>
+</div>
+
+<div id="app" style="display:none">
+  <header>
+    <h1>Barclay<span>Flix</span> Admin</h1>
+    <input id="q" placeholder="Buscar cliente ou código do aparelho" oninput="render()">
+    <div class="chips" id="chips"></div>
+  </header>
+  <main id="list"></main>
+</div>
+
+<div class="sheet" id="sheet" onclick="if(event.target===this)closeSheet()">
+  <div class="panel" id="panel"></div>
+</div>
+<div id="msg"></div>
+
+<script>
+let CURS = null, KEY = '', DATA = {clients:[], pendentes:[], servers:[]}, TAB = 'clientes', CUR = null;
+const TABS = [['clientes','Clientes'],['pendentes','Aparelhos novos'],['servidores','Servidores']];
+const $ = id => document.getElementById(id);
+
+function run(fn, ...args) {
+  return new Promise((ok, fail) => google.script.run
+    .withSuccessHandler(ok).withFailureHandler(e => fail(new Error(e.message || String(e))))[fn](KEY, ...args));
+}
+function toast(text, kind) {
+  const m = $('msg'); m.textContent = text; m.className = kind || ''; m.style.display = 'block';
+  clearTimeout(toast.t); toast.t = setTimeout(() => m.style.display = 'none', kind === 'bad' ? 6000 : 2500);
+}
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const br = d => d ? d.split('-').reverse().join('/') : '';
+const LABEL = {ativo:'Ativo', nao_registrado:'Aguardando', bloqueado:'Bloqueado', expirado:'Vencido', sem_aparelho:'Sem aparelho'};
+
+function init() {
+  try { KEY = localStorage.getItem('bf_key') || ''; } catch (e) {}
+  if (KEY) load(); else $('login').style.display = 'block';
+}
+async function doLogin() {
+  KEY = $('key').value.trim();
+  if (KEY) await load();
+}
+async function load() {
+  try {
+    DATA = await run('adminList');
+    try { localStorage.setItem('bf_key', KEY); } catch (e) {}
+    $('login').style.display = 'none'; $('app').style.display = 'block';
+    render();
+  } catch (e) {
+    try { localStorage.removeItem('bf_key'); } catch (x) {}
+    $('app').style.display = 'none'; $('login').style.display = 'block';
+    toast(e.message, 'bad');
+  }
+}
+function ago(iso) {
+  const t = Date.parse(iso); if (!t) return '—';
+  const m = Math.round((Date.now() - t) / 60000);
+  if (m < 2) return 'agora'; if (m < 60) return m + ' min';
+  if (m < 1440) return Math.round(m / 60) + ' h'; return Math.round(m / 1440) + ' d';
+}
+function render() {
+  $('chips').innerHTML = TABS.map(([k, n]) => {
+    const c = k === 'clientes' ? DATA.clients.length : k === 'pendentes' ? DATA.pendentes.length : DATA.servers.length;
+    return `<button class="chip ${k === TAB ? 'on' : ''}" onclick="TAB='${k}';render()">${n} (${c})</button>`;
+  }).join('') + `<button class="chip" onclick="openClient(null)">+ Novo cliente</button>`;
+  const q = $('q').value.trim().toLowerCase();
+  let html = '';
+  if (TAB === 'clientes') {
+    const list = DATA.clients.filter(c => !q || (c.id + ' ' + c.aparelhos.map(a => a.codigo).join(' ')).toLowerCase().includes(q));
+    html = list.map(c => `
+      <div class="card" onclick="openClient(DATA.clients[${DATA.clients.indexOf(c)}].id)">
+        <div class="row"><div class="name">${esc(c.id)}</div><span class="tag ${c.status}">${LABEL[c.status]}</span></div>
+        <div class="sub">${c.aparelhos.length} aparelho(s)${c.expira ? ' · vence ' + br(c.expira) : ''}</div>
+        ${c.aparelhos.map(a => `<div class="sub">• ${esc(a.plataforma || '?')} · ${esc(a.codigo)} · visto há ${ago(a.ultimo)}</div>`).join('')}
+        ${c.servidores.length ? `<div class="sub">Servidores: ${esc(c.servidores.join(', '))}</div>` : ''}
+      </div>`).join('');
+  } else if (TAB === 'servidores') {
+    html = DATA.servers.map((s, i) => `
+      <div class="card" onclick="openServer(${i})">
+        <div class="row"><div class="name">${esc(s.apelido)}</div><span class="tag ${s.ativo ? 'ativo' : 'bloqueado'}">${s.ativo ? 'Ativo' : 'Inativo'}</span></div>
+        ${s.hosts.map(h => `<div class="sub">${esc(h)}</div>`).join('')}
+        <div class="sub">Formato ${esc(s.format)}</div>
+      </div>`).join('') + `<div class="btns"><button class="btn pri" onclick="openServer(-1)">+ Novo servidor</button></div>`;
+  } else {
+    const list = DATA.pendentes.filter(d => !q || (d.codigo + ' ' + d.plataforma).toLowerCase().includes(q));
+    html = list.map(d => `
+      <div class="card" onclick="openClient(null, DATA.pendentes[${DATA.pendentes.indexOf(d)}].id)">
+        <div class="row"><div class="name">Código ${esc(d.codigo)}</div><span class="tag nao_registrado">Aguardando</span></div>
+        <div class="sub">${esc(d.plataforma || '?')} · v${esc(d.versao || '?')} · visto há ${ago(d.ultimo)}</div>
+        <div class="sub">Toque para liberar para um cliente</div>
+      </div>`).join('');
+  }
+  $('list').innerHTML = html || '<div class="sub" style="padding:24px 4px">Nada por aqui.</div>';
+}
+
+async function openClient(id, presetDevice) {
+  CUR = id ? DATA.clients.find(c => c.id === id) : null;
+  let acessos = [];
+  if (CUR) {
+    try { acessos = await run('adminGetClient', id); } catch (e) { toast(e.message, 'bad'); return; }
+  }
+  const inDays = n => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+  const exp = (CUR && CUR.expira) || inDays(30);
+  const mine = CUR ? CUR.aparelhos : [];
+  const free = DATA.pendentes;
+  const dev = (d, on) => `<label class="dev"><input type="checkbox" value="${esc(d.id)}" ${on ? 'checked' : ''}>
+    <span>${esc(d.plataforma || '?')} · código ${esc(d.codigo)}<br><small>visto há ${ago(d.ultimo)}</small></span></label>`;
+  const others = DATA.clients.filter(c => !CUR || c.id !== CUR.id);
+  $('panel').innerHTML = `
+    <div class="row"><div class="name">${CUR ? 'Editar cliente' : 'Novo cliente'}</div>${CUR ? `<span class="tag ${CUR.status}">${LABEL[CUR.status]}</span>` : ''}</div>
+    <label>Nome do cliente</label>
+    <input id="f_nome" value="${esc(CUR ? CUR.id : '')}" ${CUR ? 'readonly' : ''} placeholder="Ex.: João Silva">
+    <label>Validade (vale para todos os aparelhos)</label><input id="f_exp" type="date" value="${exp}">
+    <div class="chips">${[30, 90, 180, 365].map(n => `<button class="chip" onclick="$('f_exp').value='${inDays(n)}'">+${n} dias</button>`).join('')}</div>
+    <label>Aparelhos do cliente</label>
+    <div id="devs">${mine.map(d => dev(d, true)).join('')}${free.map(d => dev(d, d.id === presetDevice)).join('')}
+      ${!mine.length && !free.length ? '<div class="sub">Nenhum aparelho novo. Abra o app no aparelho do cliente para aparecer aqui.</div>' : ''}</div>
+    ${others.length ? `<label>Copiar servidores de outro cliente</label>
+      <select onchange="copyFrom(this.value)"><option value="">—</option>${others.map(o => `<option value="${esc(o.id)}">${esc(o.id)}</option>`).join('')}</select>` : ''}
+    <label>Servidores e acessos Xtream</label>
+    <div id="srvs">${DATA.servers.map(s => {
+      const a = acessos.find(x => x.servidorId === s.id) || {};
+      return `<div class="srv" data-id="${esc(s.id)}"><div class="t"><input type="checkbox" ${a.user ? 'checked' : ''}> ${esc(s.apelido)}${s.ativo ? '' : ' (inativo)'}</div>
+        <div class="f"><input placeholder="Usuário" value="${esc(a.user)}"><input placeholder="Senha" value="${esc(a.pass)}"></div></div>`;
+    }).join('')}</div>
+    <div class="btns">
+      <button class="btn pri" onclick="save()">${CUR ? 'Salvar' : 'Cadastrar e liberar'}</button>
+      ${CUR ? `<button class="btn" onclick="renew()">Renovar +30 dias</button>` : ''}
+      ${CUR && CUR.status === 'bloqueado' ? `<button class="btn" onclick="setStatus('ativo')">Desbloquear</button>` : ''}
+      ${CUR && CUR.status !== 'bloqueado' && CUR.status !== 'sem_aparelho' ? `<button class="btn bad" onclick="setStatus('bloqueado')">Bloquear</button>` : ''}
+      <button class="btn" onclick="closeSheet()">Fechar</button>
+    </div>`;
+  $('sheet').classList.add('show');
+}
+function openServer(i) {
+  const s = i >= 0 ? DATA.servers[i] : {id: '', apelido: '', hosts: [], format: 'ts', ativo: true};
+  CURS = s;
+  $('panel').innerHTML = `
+    <div class="row"><div class="name">${s.id ? 'Editar servidor' : 'Novo servidor'}</div></div>
+    <label>Nome do servidor</label><input id="s_nome" value="${esc(s.apelido)}" placeholder="Ex.: TVPLAY">
+    <label>DNS (um por linha; o primeiro é o principal, os outros são reserva)</label>
+    <textarea id="s_hosts" rows="4" placeholder="http://servidor.com:8080">${esc(s.hosts.join('\n'))}</textarea>
+    <label>Formato do canal ao vivo</label>
+    <select id="s_fmt"><option value="ts" ${s.format === 'ts' ? 'selected' : ''}>ts (padrão)</option><option value="m3u8" ${s.format === 'm3u8' ? 'selected' : ''}>m3u8</option></select>
+    <label class="dev"><input type="checkbox" id="s_ativo" ${s.ativo ? 'checked' : ''}><span>Servidor ativo (aparece para os clientes)</span></label>
+    <div class="btns"><button class="btn pri" onclick="saveServer()">Salvar</button><button class="btn" onclick="closeSheet()">Fechar</button></div>`;
+  $('sheet').classList.add('show');
+}
+async function saveServer() {
+  const hosts = $('s_hosts').value.split(/[\n;,]+/).map(x => x.trim()).filter(Boolean);
+  const r = await call('Salvando', 'adminSaveServer', {id: CURS.id, apelido: $('s_nome').value, hosts, format: $('s_fmt').value, ativo: $('s_ativo').checked});
+  if (r) { closeSheet(); toast('Servidor salvo.', 'ok'); }
+}
+function closeSheet() { $('sheet').classList.remove('show'); }
+async function copyFrom(id) {
+  if (!id) return;
+  try {
+    const ac = await run('adminGetClient', id);
+    document.querySelectorAll('#srvs .srv').forEach(el => {
+      const a = ac.find(x => x.servidorId === el.dataset.id);
+      const [cb] = el.querySelectorAll('input[type=checkbox]');
+      const [u, p] = el.querySelectorAll('.f input');
+      cb.checked = !!a; u.value = a ? a.user : ''; p.value = a ? a.pass : '';
+    });
+  } catch (e) { toast(e.message, 'bad'); }
+}
+async function call(label, fn, ...args) {
+  toast(label + '…');
+  try { const r = await run(fn, ...args); await load(); return r; }
+  catch (e) { toast(e.message, 'bad'); return null; }
+}
+async function save() {
+  const acessos = [];
+  document.querySelectorAll('#srvs .srv').forEach(el => {
+    const [cb] = el.querySelectorAll('input[type=checkbox]');
+    const [u, p] = el.querySelectorAll('.f input');
+    if (cb.checked) acessos.push({servidorId: el.dataset.id, user: u.value.trim(), pass: p.value.trim()});
+  });
+  const deviceIds = [...document.querySelectorAll('#devs input:checked')].map(i => i.value);
+  if (!deviceIds.length && !confirm('Nenhum aparelho marcado. Salvar mesmo assim?')) return;
+  const removeIds = CUR ? CUR.aparelhos.map(a => a.id).filter(id => !deviceIds.includes(id)) : [];
+  const r = await call('Salvando', 'adminSaveClient', {nome: $('f_nome').value, expira: $('f_exp').value, acessos, deviceIds, removeIds});
+  if (r) { closeSheet(); toast('Cliente salvo e liberado.', 'ok'); }
+}
+async function renew() {
+  const r = await call('Renovando', 'adminRenewClient', CUR.id, 30);
+  if (r) { closeSheet(); toast('Nova validade: ' + br(r.expira), 'ok'); }
+}
+async function setStatus(s) {
+  if (s === 'bloqueado' && !confirm('Bloquear todos os aparelhos deste cliente?')) return;
+  const r = await call('Atualizando', 'adminSetClientStatus', CUR.id, s);
+  if (r) { closeSheet(); toast(s === 'ativo' ? 'Desbloqueado.' : 'Bloqueado.', 'ok'); }
+}
+init();
+</script>
+</body>
+</html>

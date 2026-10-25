@@ -5,7 +5,9 @@ import '../../../core/format.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/data/device_models.dart';
 import '../../auth/state/auth_provider.dart';
+import '../../favorites/data/favorites_repository.dart';
 import '../../progress/data/progress_repository.dart';
+import '../../settings/ui/settings_view.dart';
 import '../../xtream/data/xtream_client.dart';
 import '../../xtream/state/server_session_provider.dart';
 import '../../xtream/ui/server_screen.dart';
@@ -39,6 +41,21 @@ class HomePlaceholderScreen extends StatelessWidget {
                     ],
                   )),
                   const Spacer(),
+                  IconButton(
+                    tooltip: 'Configurações',
+                    icon: const Icon(Icons.settings),
+                    style: ButtonStyle(
+                      side: WidgetStateProperty.resolveWith(
+                        (states) => states.contains(WidgetState.focused)
+                            ? const BorderSide(color: Colors.white, width: 2)
+                            : null,
+                      ),
+                    ),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -91,10 +108,16 @@ class HomePlaceholderScreen extends StatelessWidget {
   void _open(BuildContext context, XtreamServer server) {
     final api = context.read<XtreamApi>();
     final progress = context.read<ProgressApi>();
+    final favorites = context.read<FavoritesApi>();
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ChangeNotifierProvider(
-          create: (_) => ServerSessionProvider(api, server, progress: progress)..connect(),
+          create: (_) => ServerSessionProvider(
+            api,
+            server,
+            progress: progress,
+            favorites: favorites,
+          )..connect(),
           child: const ServerScreen(),
         ),
       ),

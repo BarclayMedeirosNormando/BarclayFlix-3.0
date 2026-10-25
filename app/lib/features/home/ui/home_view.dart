@@ -5,6 +5,7 @@ import '../../../core/format.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/focus_ring.dart';
 import '../../player/ui/play_launcher.dart';
+import '../../version/state/version_provider.dart';
 import '../../xtream/data/xtream_models.dart';
 import '../../xtream/state/server_session_provider.dart';
 import '../../xtream/ui/live_view.dart';
@@ -22,6 +23,7 @@ class HomeView extends StatefulWidget {
 
 class _HomeViewState extends State<HomeView> {
   String? _liveCategoryId;
+  bool _updateDismissed = false;
 
   @override
   void initState() {
@@ -52,9 +54,17 @@ class _HomeViewState extends State<HomeView> {
         : provider.channels(_liveCategoryId!).items;
     final continueList = provider.continueWatching;
 
+    final version = context.watch<VersionProvider>();
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
       children: [
+        if (version.updateAvailable && !_updateDismissed)
+          _UpdateBanner(
+            latest: version.info.latest,
+            current: version.current,
+            url: version.info.updateUrl,
+            onDismiss: () => setState(() => _updateDismissed = true),
+          ),
         _Hero(
           entry: continueList.isEmpty ? null : continueList.first,
           onPlay: (entry) => launchPlayer(context, [entry.item]),
@@ -104,8 +114,8 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(top: 28, bottom: 12),
-        child: Text(text, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+        padding: const EdgeInsets.only(top: 22, bottom: 10),
+        child: Text(text, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
       );
 }
 
@@ -120,7 +130,7 @@ class _Hero extends StatelessWidget {
   Widget build(BuildContext context) {
     final e = entry;
     return Container(
-      padding: const EdgeInsets.all(32),
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 22),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
         gradient: const LinearGradient(
@@ -153,16 +163,16 @@ class _Hero extends StatelessWidget {
             e?.item.title ?? 'Escolha o que assistir',
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 40, fontWeight: FontWeight.w800, height: 1.1),
+            style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w800, height: 1.1),
           ),
           const SizedBox(height: 10),
           Text(
             e == null
                 ? 'Canais ao vivo, filmes e séries do seu servidor.'
                 : 'Parou em ${formatDuration(e.position)} de ${formatDuration(e.duration)}',
-            style: const TextStyle(fontSize: 18, color: AppColors.textMuted),
+            style: const TextStyle(fontSize: 16, color: AppColors.textMuted),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 18),
           FilledButton.icon(
             autofocus: true,
             style: focusRingStyle(),
@@ -330,6 +340,48 @@ class _ChannelCardState extends State<_ChannelCard> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Aviso (não bloqueia) de que existe uma versão mais nova do aplicativo.
+class _UpdateBanner extends StatelessWidget {
+  const _UpdateBanner({
+    required this.latest,
+    required this.current,
+    required this.url,
+    required this.onDismiss,
+  });
+
+  final String latest;
+  final String current;
+  final String url;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: AppColors.accent.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.accent, width: 2),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.system_update, color: AppColors.accent),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Nova versão $latest disponível (você tem $current).'
+              '${url.isEmpty ? ' Fale com o administrador.' : '  Baixe em: $url'}',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          TextButton(style: focusRingStyle(), onPressed: onDismiss, child: const Text('Depois')),
+        ],
       ),
     );
   }

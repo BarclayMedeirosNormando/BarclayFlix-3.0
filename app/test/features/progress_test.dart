@@ -82,6 +82,13 @@ class _Api implements XtreamApi {
       ));
 
   @override
+  Future<ApiResult<List<EpgEntry>>> shortEpg(
+    XtreamSession session,
+    String streamId,
+  ) async =>
+      const ApiSuccess<List<EpgEntry>>([]);
+
+  @override
   Future<ApiResult<XtreamVodInfo>> vodInfo(
     XtreamSession session,
     String vodId,

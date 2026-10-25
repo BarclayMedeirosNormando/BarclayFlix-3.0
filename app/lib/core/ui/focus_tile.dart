@@ -10,6 +10,7 @@ class FocusTile extends StatefulWidget {
     required this.child,
     required this.onTap,
     this.onFocus,
+    this.onLongPress,
     this.selected = false,
     this.autofocus = false,
     this.padding = const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
@@ -18,6 +19,7 @@ class FocusTile extends StatefulWidget {
   final Widget child;
   final VoidCallback onTap;
   final VoidCallback? onFocus;
+  final VoidCallback? onLongPress;
   final bool selected;
   final bool autofocus;
   final EdgeInsetsGeometry padding;
@@ -47,6 +49,7 @@ class _FocusTileState extends State<FocusTile> {
         autofocus: widget.autofocus,
         borderRadius: BorderRadius.circular(14),
         onTap: widget.onTap,
+        onLongPress: widget.onLongPress,
         onFocusChange: (f) {
           setState(() => _focused = f);
           if (f) {

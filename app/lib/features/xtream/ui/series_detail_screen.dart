@@ -5,6 +5,8 @@ import '../../../core/format.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/focus_ring.dart';
 import '../../../core/ui/focus_tile.dart';
+import '../../favorites/data/favorites_repository.dart';
+import '../../favorites/ui/favorite_actions.dart';
 import '../../player/ui/play_launcher.dart';
 import '../data/xtream_models.dart';
 import '../state/server_session_provider.dart';
@@ -71,6 +73,28 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                           ?.copyWith(fontWeight: FontWeight.w800),
                     ),
                   ),
+                  Builder(builder: (context) {
+                    final entry = FavoriteEntry(
+                      type: FavoriteType.series,
+                      id: widget.series.id,
+                      name: widget.series.name,
+                      imageUrl: widget.series.coverUrl,
+                    );
+                    final on = provider.isFavorite(entry.type, entry.id);
+                    return IconButton(
+                      tooltip: on ? 'Remover da Minha lista' : 'Adicionar à Minha lista',
+                      icon: Icon(on ? Icons.favorite : Icons.favorite_border,
+                          color: on ? AppColors.accent : null),
+                      style: ButtonStyle(
+                        side: WidgetStateProperty.resolveWith(
+                          (states) => states.contains(WidgetState.focused)
+                              ? const BorderSide(color: Colors.white, width: 2)
+                              : null,
+                        ),
+                      ),
+                      onPressed: () => toggleFavoriteWithMessage(context, entry),
+                    );
+                  }),
                 ],
               ),
               Expanded(child: _body(provider, state, detail)),
@@ -144,11 +168,10 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                   style: focusRingStyle(),
                   icon: const Icon(Icons.play_arrow),
                   label: Text('Continuar T${resume.season}:E${resume.number}'),
-                  onPressed: () => launchPlayer(
-                    context,
-                    [for (final e in detail.seasons[resume.season]!) provider.episodeItem(widget.series.id, detail, e)],
-                    index: detail.seasons[resume.season]!.indexOf(resume),
-                  ),
+                  onPressed: () {
+                    final q = provider.episodeQueue(widget.series.id, detail, resume);
+                    launchPlayer(context, q.items, index: q.index);
+                  },
                 ),
               ],
             ],
@@ -179,11 +202,10 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
               final e = episodes[i];
               return FocusTile(
                 autofocus: resume == null && i == 0,
-                onTap: () => launchPlayer(
-                  context,
-                  [for (final x in episodes) provider.episodeItem(widget.series.id, detail, x)],
-                  index: i,
-                ),
+                onTap: () {
+                  final q = provider.episodeQueue(widget.series.id, detail, e);
+                  launchPlayer(context, q.items, index: q.index);
+                },
                 child: Row(
                   children: [
                     SizedBox(

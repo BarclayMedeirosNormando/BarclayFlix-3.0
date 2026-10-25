@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -7,8 +6,11 @@ import 'features/auth/data/auth_repository.dart';
 import 'features/auth/state/auth_provider.dart';
 import 'features/auth/ui/activation_screen.dart';
 import 'features/auth/ui/status_screen.dart';
+import 'features/favorites/data/favorites_repository.dart';
 import 'features/home/ui/home_placeholder_screen.dart';
 import 'features/progress/data/progress_repository.dart';
+import 'features/version/data/version_repository.dart';
+import 'features/version/state/version_provider.dart';
 import 'features/xtream/data/xtream_client.dart';
 
 class BarclayFlixApp extends StatelessWidget {
@@ -17,6 +19,9 @@ class BarclayFlixApp extends StatelessWidget {
     required this.checker,
     this.xtream,
     this.progress = const NullProgressApi(),
+    this.favorites = const NullFavoritesApi(),
+    this.version = const NullVersionApi(),
+    this.appVersion = '0.0.0',
   });
 
   final DeviceChecker checker;
@@ -26,6 +31,13 @@ class BarclayFlixApp extends StatelessWidget {
 
   /// Progresso de reprodução (padrão: nenhum, usado em testes).
   final ProgressApi progress;
+
+  /// Minha lista (padrão: nenhuma, usado em testes).
+  final FavoritesApi favorites;
+
+  /// Checagem de versão (padrão: nenhuma, usado em testes) e versão instalada.
+  final VersionApi version;
+  final String appVersion;
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +50,9 @@ class BarclayFlixApp extends StatelessWidget {
           },
         ),
         Provider<ProgressApi>.value(value: progress),
+        Provider<FavoritesApi>.value(value: favorites),
         ChangeNotifierProvider(create: (_) => AuthProvider(checker)..start()),
+        ChangeNotifierProvider(create: (_) => VersionProvider(version, appVersion)..check()),
       ],
       child: MaterialApp(
         title: 'BarclayFlix',
@@ -58,6 +72,18 @@ class AuthGate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    final version = context.watch<VersionProvider>();
+    if (version.force) {
+      return StatusScreen(
+        icon: Icons.system_update,
+        title: 'Atualização necessária',
+        message: 'Esta versão (${version.current}) não é mais aceita. '
+            'Instale a versão ${version.info.minSupported.isEmpty ? 'mais nova' : version.info.minSupported}.'
+            '${version.info.updateUrl.isEmpty ? '\nFale com o administrador.' : '\nBaixe em: ${version.info.updateUrl}'}',
+        actionLabel: 'Verificar de novo',
+        onAction: version.check,
+      );
+    }
     return switch (auth.phase) {
       AuthPhase.active => const HomePlaceholderScreen(),
       AuthPhase.blocked => const StatusScreen(
@@ -77,23 +103,27 @@ class AuthGate extends StatelessWidget {
   }
 }
 
-/// Em TVs Android a tela lógica é pequena e a interface (desenhada para 1080p)
-/// fica grande demais; reduz tudo proporcionalmente. Celular e Windows: sem efeito.
+/// Escala responsiva: a interface é desenhada para ~1600x900 (densa, estilo TV). Em telas largas
+/// (TV, Windows) que tenham menos espaço lógico que isso, reduz tudo na mesma
+/// proporção; nunca amplia. Celular (<900 px de largura) usa o layout compacto.
 class _TvScale extends StatelessWidget {
   const _TvScale({required this.child});
 
   final Widget child;
 
-  static const double scale = 0.75;
+  static const double refWidth = 1600;
+  static const double refHeight = 900;
 
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
     final size = mq.size;
-    final isTv = defaultTargetPlatform == TargetPlatform.android &&
-        size.width >= 900 &&
-        size.width / size.height > 1.6;
-    if (!isTv) return child;
+    if (size.width < 900) return child;
+    final scale = (size.width / refWidth < size.height / refHeight
+            ? size.width / refWidth
+            : size.height / refHeight)
+        .clamp(0.5, 1.0);
+    if (scale >= 0.99) return child;
     final inner = Size(size.width / scale, size.height / scale);
     return ClipRect(
       child: OverflowBox(
