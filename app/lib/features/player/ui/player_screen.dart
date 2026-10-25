@@ -48,7 +48,10 @@ class PlayerScreen extends StatefulWidget {
 
 class _PlayerScreenState extends State<PlayerScreen> {
   late final Player _player = Player(
-    configuration: const PlayerConfiguration(bufferSize: 64 * 1024 * 1024),
+    configuration: PlayerConfiguration(
+      // Aparelho fraco (modo leve): buffer menor para não faltar memória.
+      bufferSize: (VideoSettings.lite.value ? 32 : 64) * 1024 * 1024,
+    ),
   );
   late final VideoController _video = VideoController(
     _player,
@@ -66,6 +69,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int _auto = 0;
   BoxFit _fit = BoxFit.contain;
   String? _hint;
+  final List<DateTime> _stalls = [];
+  bool _boosted = false;
   Timer? _hintTimer;
   late int _index = widget.initialIndex;
   Timer? _saveTimer;
@@ -93,6 +98,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
     _player.stream.buffering.listen((b) {
       if (mounted) setState(() => _buffering = b);
+      if (b) _onStall();
     });
     _saveTimer = Timer.periodic(const Duration(seconds: 30), (_) => _report());
     _open();
@@ -141,6 +147,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  /// Internet oscilando: se o vídeo parar 3 vezes em 90 s, aumenta o buffer
+  /// (mais segundos guardados à frente) para aguentar as quedas.
+  void _onStall() {
+    // A primeira "parada" é só a abertura do vídeo.
+    if (_player.state.position < const Duration(seconds: 5)) return;
+    final now = DateTime.now();
+    _stalls
+      ..add(now)
+      ..removeWhere((t) => now.difference(t) > const Duration(seconds: 90));
+    if (_boosted || _stalls.length < 3) return;
+    _boosted = true;
+    final secs = _item.isLive ? 25 : (VideoSettings.lite.value ? 40 : 60);
+    try {
+      final native = _player.platform;
+      if (native is NativePlayer) native.setProperty('demuxer-readahead-secs', '$secs');
+    } catch (_) {}
+  }
+
   /// Programação do canal (agora/depois); sem guia, nada aparece.
   Future<void> _loadEpg() async {
     final id = _item.epgId;
@@ -183,6 +207,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _open() async {
     _cancelNext();
+    _stalls.clear();
+    _boosted = false;
     setState(() {
       _error = null;
       _buffering = true;

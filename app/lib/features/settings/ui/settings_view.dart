@@ -38,6 +38,23 @@ class SettingsView extends StatelessWidget {
             ),
           ),
         ),
+        const SizedBox(height: 12),
+        ValueListenableBuilder<bool>(
+          valueListenable: VideoSettings.lite,
+          builder: (context, on, _) => _Card(
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Modo leve',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text(
+                'Menos efeitos visuais e menos memória. Ajuda TVs e aparelhos antigos. '
+                'Reabra o vídeo para valer no player.',
+              ),
+              value: on,
+              onChanged: VideoSettings.setLite,
+            ),
+          ),
+        ),
         const SizedBox(height: 24),
         const _SectionTitle('APLICATIVO'),
         _Card(

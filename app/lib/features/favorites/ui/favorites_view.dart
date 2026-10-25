@@ -247,6 +247,8 @@ class _FavoriteCardState extends State<_FavoriteCard> {
                   ? Center(child: Icon(fallbackIcon, size: 40, color: AppColors.textMuted))
                   : Image.network(
                       f.imageUrl!,
+                      cacheWidth: 360,
+                      filterQuality: FilterQuality.low,
                       fit: f.type == FavoriteType.live ? BoxFit.contain : BoxFit.cover,
                       errorBuilder: (_, _, _) =>
                           Center(child: Icon(fallbackIcon, size: 40, color: AppColors.textMuted)),

@@ -337,6 +337,9 @@ class _PosterCardState extends State<_PosterCard> {
                       : Image.network(
                           d.imageUrl!,
                           fit: BoxFit.cover,
+                          cacheWidth: 360,
+                          filterQuality: FilterQuality.low,
+                          gaplessPlayback: true,
                           errorBuilder: (_, _, _) => const _PosterFallback(),
                         ),
                   if (d.favorite != null &&

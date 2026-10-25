@@ -66,6 +66,9 @@ class ServerSessionProvider extends ChangeNotifier {
         _favoritesApi = favorites;
 
   final XtreamApi _api;
+
+  /// Listas guardadas no aparelho (null se o cliente de rede não tiver cache).
+  XtreamCachedLists? get _disk => _api is XtreamCachedLists ? _api as XtreamCachedLists : null;
   final ProgressApi _progress;
   final FavoritesApi _favoritesApi;
   final XtreamServer server;
@@ -155,12 +158,20 @@ class ServerSessionProvider extends ChangeNotifier {
     _sections[section] = const SectionState(loading: true);
     _notify();
 
+    // Mostra na hora o que ficou guardado da última vez, e atualiza ao fundo.
+    final stale = current?.items == null ? await _disk?.cachedCategories(session, section) : null;
+    if (_disposed) return;
+    if (stale != null) {
+      _sections[section] = SectionState(loading: true, items: stale);
+      _notify();
+    }
+
     final result = await _api.categories(session, section);
     if (_disposed) return;
 
     _sections[section] = switch (result) {
       ApiSuccess<List<XtreamCategory>>(:final data) => SectionState(items: data),
-      _ => SectionState(error: result.failureMessage),
+      _ => stale != null ? SectionState(items: stale) : SectionState(error: result.failureMessage),
     };
     _notify();
   }
@@ -178,12 +189,19 @@ class ServerSessionProvider extends ChangeNotifier {
     _channels[categoryId] = const ChannelsState(loading: true);
     _notify();
 
+    final stale = current?.items == null ? await _disk?.cachedChannels(session, categoryId) : null;
+    if (_disposed) return;
+    if (stale != null) {
+      _channels[categoryId] = ChannelsState(loading: true, items: stale);
+      _notify();
+    }
+
     final result = await _api.liveStreams(session, categoryId);
     if (_disposed) return;
 
     _channels[categoryId] = switch (result) {
       ApiSuccess<List<XtreamChannel>>(:final data) => ChannelsState(items: data),
-      _ => ChannelsState(error: result.failureMessage),
+      _ => stale != null ? ChannelsState(items: stale) : ChannelsState(error: result.failureMessage),
     };
     _notify();
   }
@@ -192,6 +210,7 @@ class ServerSessionProvider extends ChangeNotifier {
         _movies,
         categoryId,
         (s) => _api.vodStreams(s, categoryId),
+        cached: (s) async => _disk?.cachedMovies(s, categoryId),
         force: force,
       );
 
@@ -199,6 +218,7 @@ class ServerSessionProvider extends ChangeNotifier {
         _series,
         categoryId,
         (s) => _api.seriesList(s, categoryId),
+        cached: (s) async => _disk?.cachedSeries(s, categoryId),
         force: force,
       );
 
@@ -213,6 +233,7 @@ class ServerSessionProvider extends ChangeNotifier {
     Map<String, LoadState<T>> cache,
     String key,
     Future<ApiResult<T>> Function(XtreamSession) fetch, {
+    Future<T?> Function(XtreamSession)? cached,
     bool force = false,
   }) async {
     final session = _session;
@@ -223,15 +244,24 @@ class ServerSessionProvider extends ChangeNotifier {
       return;
     }
 
-    cache[key] = LoadState<T>(loading: true);
+    cache[key] = LoadState<T>(loading: true, data: current?.data);
     _notify();
+
+    // Mostra na hora o que ficou guardado no aparelho, e atualiza ao fundo.
+    final T? stale = (cached != null && current?.data == null) ? await cached(session) : null;
+    if (_disposed) return;
+    if (stale != null) {
+      cache[key] = LoadState<T>(loading: true, data: stale);
+      _notify();
+    }
+    final T? shown = stale ?? current?.data;
 
     final result = await fetch(session);
     if (_disposed) return;
 
     cache[key] = switch (result) {
       ApiSuccess<T>(:final data) => LoadState<T>(data: data),
-      _ => LoadState<T>(error: result.failureMessage),
+      _ => shown != null ? LoadState<T>(data: shown) : LoadState<T>(error: result.failureMessage),
     };
     _notify();
   }
