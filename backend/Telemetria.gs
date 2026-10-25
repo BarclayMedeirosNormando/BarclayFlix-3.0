@@ -148,7 +148,7 @@ function buildPlaybacks_(rows) {
         device: str_(r[1]), cliente: str_(r[2]), servidor: str_(r[4]), tipo: str_(r[6]),
         item: str_(r[7]), nome: str_(r[8]), start: ts, last: ts,
         ok: false, fail: false, drop: false, stalled: false, stopped: false,
-        watched: 0, stalls: 0, openSecs: 0,
+        watched: 0, stalls: 0, stallS: 0, openSecs: 0,
       };
     }
     if (ts < s.start) s.start = ts;
@@ -164,6 +164,8 @@ function buildPlaybacks_(rows) {
       case 'stop':
         s.watched = Math.max(s.watched, v1);
         s.stalls = Math.max(s.stalls, v2);
+        const st = /^st=(\d+)$/.exec(str_(r[11]));
+        if (st) s.stallS = Math.max(s.stallS, Number(st[1]));
         if (str_(r[5]) === 'stop') s.stopped = true;
         break;
     }
@@ -213,7 +215,7 @@ function adminMonitor(key) {
   }).sort(function (a, b) { return b.start - a.start; }).map(function (p) {
     return {
       cliente: p.cliente || 'sem cliente', servidor: srvName(p.servidor), tipo: p.tipo, nome: p.nome,
-      desde: p.start, estado: p.ok ? (p.travando ? 'travando' : 'assistindo') : 'abrindo', travadas: p.stalls,
+      desde: p.start, estado: p.ok ? (p.travando ? 'travando' : 'assistindo') : 'abrindo', travadas: p.stalls, travadasS: p.stallS,
     };
   });
 
@@ -314,7 +316,7 @@ function adminClientHistory(key, clienteId) {
     lista: pbs.slice(0, 40).map(function (p) {
       return {
         inicio: p.start, tipo: p.tipo, nome: p.nome, servidor: names[p.servidor] || p.servidor,
-        segundos: p.watched, travadas: p.stalls,
+        segundos: p.watched, travadas: p.stalls, travadasS: p.stallS,
         resultado: p.fail ? 'falhou' : p.drop ? 'caiu' : p.ok ? (p.travando ? 'travando' : 'ok') : 'abandonou',
       };
     }),
