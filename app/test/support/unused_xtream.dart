@@ -26,4 +26,10 @@ mixin UnusedXtreamMethods {
     String vodId,
   ) async =>
       const ApiError<XtreamVodInfo>('NOT_USED', 'não usado neste teste');
+
+  Future<ApiResult<List<EpgEntry>>> shortEpg(
+    XtreamSession session,
+    String streamId,
+  ) async =>
+      const ApiSuccess<List<EpgEntry>>([]);
 }

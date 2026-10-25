@@ -6,10 +6,13 @@ import 'app.dart';
 import 'core/config/app_config.dart';
 import 'core/device/device_identity.dart';
 import 'core/device/platform_kind.dart';
+import 'core/settings/video_settings.dart';
 import 'core/network/api_client.dart';
 import 'core/ui/config_error_app.dart';
 import 'features/auth/data/auth_repository.dart';
+import 'features/favorites/data/favorites_repository.dart';
 import 'features/progress/data/progress_repository.dart';
+import 'features/version/data/version_repository.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +26,7 @@ Future<void> main() async {
   }
 
   MediaKit.ensureInitialized();
+  await VideoSettings.load();
 
   final info = await PackageInfo.fromPlatform();
   final platform = await detectPlatform();
@@ -33,5 +37,8 @@ Future<void> main() async {
   runApp(BarclayFlixApp(
     checker: AuthRepository(api, identity, platform),
     progress: ProgressRepository(api, identity),
+    favorites: FavoritesRepository(api, identity),
+    version: VersionRepository(api, platform, info.version),
+    appVersion: info.version,
   ));
 }

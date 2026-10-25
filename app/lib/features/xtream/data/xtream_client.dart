@@ -40,6 +40,12 @@ abstract interface class XtreamApi {
     XtreamSession session,
     String vodId,
   );
+
+  /// Programa atual e próximos de um canal (lista vazia se o painel não tiver guia).
+  Future<ApiResult<List<EpgEntry>>> shortEpg(
+    XtreamSession session,
+    String streamId,
+  );
 }
 
 /// Cliente da API Xtream Codes (`player_api.php`).
@@ -122,7 +128,8 @@ class XtreamClient implements XtreamApi {
   ) async {
     final uri = _playerApi(session.baseUri, session.server, {
       'action': 'get_live_streams',
-      'category_id': categoryId,
+      // Vazio = todos os canais (usado pela busca).
+      if (categoryId.isNotEmpty) 'category_id': categoryId,
     });
     final result = await _getJson(uri, listTimeout);
     if (result is! ApiSuccess<Object?>) {
@@ -148,16 +155,39 @@ class XtreamClient implements XtreamApi {
     XtreamSession session,
     String categoryId,
   ) =>
-      _listOf(session, 'get_vod_streams', {'category_id': categoryId},
-          XtreamMovie.fromJson, 'filmes');
+      _newestFirst(
+        _listOf(session, 'get_vod_streams', {if (categoryId.isNotEmpty) 'category_id': categoryId},
+            XtreamMovie.fromJson, 'filmes'),
+        (m) => m.added,
+      );
 
   @override
   Future<ApiResult<List<XtreamSeries>>> seriesList(
     XtreamSession session,
     String categoryId,
   ) =>
-      _listOf(session, 'get_series', {'category_id': categoryId},
-          XtreamSeries.fromJson, 'séries');
+      _newestFirst(
+        _listOf(session, 'get_series', {if (categoryId.isNotEmpty) 'category_id': categoryId},
+            XtreamSeries.fromJson, 'séries'),
+        (s) => s.added,
+      );
+
+  /// Mais recentes primeiro (data de entrada no servidor); sem data, mantém a ordem original.
+  Future<ApiResult<List<T>>> _newestFirst<T>(
+    Future<ApiResult<List<T>>> future,
+    int Function(T) added,
+  ) async {
+    final r = await future;
+    if (r is! ApiSuccess<List<T>>) return r;
+    final list = r.data;
+    if (list.every((e) => added(e) == 0)) return r;
+    final indexed = [for (var i = 0; i < list.length; i++) (i, list[i])];
+    indexed.sort((a, b) {
+      final c = added(b.$2).compareTo(added(a.$2));
+      return c != 0 ? c : a.$1.compareTo(b.$1);
+    });
+    return ApiSuccess<List<T>>([for (final e in indexed) e.$2]);
+  }
 
   @override
   Future<ApiResult<XtreamSeriesDetail>> seriesInfo(
@@ -197,6 +227,26 @@ class XtreamClient implements XtreamApi {
     } on TypeError {
       return ApiBadPayload<XtreamVodInfo>('Filme com formato inesperado.');
     }
+  }
+
+  @override
+  Future<ApiResult<List<EpgEntry>>> shortEpg(
+    XtreamSession session,
+    String streamId,
+  ) async {
+    final uri = _playerApi(session.baseUri, session.server,
+        {'action': 'get_short_epg', 'stream_id': streamId, 'limit': '4'});
+    final result = await _getJson(uri, authTimeout);
+    if (result is! ApiSuccess<Object?>) return _fail<List<EpgEntry>>(result);
+    final data = result.data;
+    final list = data is Map<String, dynamic> ? data['epg_listings'] : null;
+    if (list is! List<dynamic>) return const ApiSuccess<List<EpgEntry>>([]);
+    final entries = <EpgEntry>[
+      for (final e in list)
+        if (e is Map<String, dynamic>)
+          if (EpgEntry.fromJson(e) case final x?) x,
+    ]..sort((a, b) => a.start.compareTo(b.start));
+    return ApiSuccess<List<EpgEntry>>(entries);
   }
 
   Future<ApiResult<List<T>>> _listOf<T>(

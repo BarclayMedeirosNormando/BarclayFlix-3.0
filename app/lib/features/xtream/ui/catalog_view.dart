@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/text.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/focus_ring.dart';
+import '../../favorites/data/favorites_repository.dart';
+import '../../favorites/ui/favorite_actions.dart';
 import '../../player/ui/play_launcher.dart';
 import '../data/xtream_models.dart';
 import '../state/server_session_provider.dart';
@@ -21,7 +24,29 @@ class CatalogView extends StatefulWidget {
 }
 
 class _CatalogViewState extends State<CatalogView> {
-  late XtreamCategory _category = widget.categories.first;
+  /// "Todos" primeiro (id vazio = sem filtro de categoria na API), depois as categorias.
+  late final List<XtreamCategory> _cats = [
+    const XtreamCategory(id: '', name: 'Todos'),
+    ...widget.categories,
+  ];
+
+  late XtreamCategory _category = _cats.first;
+
+  /// false = mais recentes primeiro (ordem da API); true = A–Z.
+  bool _alpha = false;
+  Object? _sortedSrc;
+  List<Object?> _sorted = const [];
+
+  List<T> _order<T>(List<T>? src, String Function(T) name) {
+    if (src == null) return const [];
+    if (!_alpha) return src;
+    if (!identical(src, _sortedSrc)) {
+      _sortedSrc = src;
+      _sorted = [...src]..sort((a, b) =>
+          normalizeForSearch(name(a as T)).compareTo(normalizeForSearch(name(b as T))));
+    }
+    return _sorted.cast<T>();
+  }
 
   bool get _isMovies => widget.section == XtreamSection.vod;
 
@@ -49,21 +74,45 @@ class _CatalogViewState extends State<CatalogView> {
       children: [
         SizedBox(
           height: 64,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
-            itemCount: widget.categories.length,
-            itemBuilder: (context, i) {
-              final c = widget.categories[i];
-              return _Chip(
-                label: c.name,
-                selected: c.id == _category.id,
-                onTap: () {
-                  setState(() => _category = c);
-                  _loadCurrent();
-                },
-              );
-            },
+          child: Row(
+            children: [
+              Expanded(
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.fromLTRB(24, 8, 12, 8),
+                  itemCount: _cats.length,
+                  itemBuilder: (context, i) {
+                    final c = _cats[i];
+                    return _Chip(
+                      label: c.name,
+                      selected: c.id == _category.id,
+                      onTap: () {
+                        setState(() => _category = c);
+                        _loadCurrent();
+                      },
+                    );
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(0, 8, 12, 8),
+                child: _Chip(
+                  label: 'Recentes',
+                  icon: Icons.schedule,
+                  selected: !_alpha,
+                  onTap: () => setState(() => _alpha = false),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(0, 8, 24, 8),
+                child: _Chip(
+                  label: 'A–Z',
+                  icon: Icons.sort_by_alpha,
+                  selected: _alpha,
+                  onTap: () => setState(() => _alpha = true),
+                ),
+              ),
+            ],
           ),
         ),
         Expanded(child: _grid(provider)),
@@ -81,11 +130,17 @@ class _CatalogViewState extends State<CatalogView> {
       error = state.error;
       loaded = state.data != null;
       posters = [
-        for (final m in state.data ?? const <XtreamMovie>[])
+        for (final m in _order<XtreamMovie>(state.data, (m) => m.name))
           _PosterData(
             title: m.name,
             subtitle: m.rating == null ? null : '★ ${m.rating}',
             imageUrl: m.posterUrl,
+            favorite: FavoriteEntry(
+              type: FavoriteType.vod,
+              id: m.id,
+              name: m.name,
+              imageUrl: m.posterUrl,
+            ),
             onTap: () => launchPlayer(context, [provider.movieItem(m)]),
           ),
       ];
@@ -94,12 +149,18 @@ class _CatalogViewState extends State<CatalogView> {
       error = state.error;
       loaded = state.data != null;
       posters = [
-        for (final s in state.data ?? const <XtreamSeries>[])
+        for (final s in _order<XtreamSeries>(state.data, (s) => s.name))
           _PosterData(
             title: s.name,
             subtitle: [if (s.year != null) s.year!, if (s.rating != null) '★ ${s.rating}']
                 .join('  ·  '),
             imageUrl: s.coverUrl,
+            favorite: FavoriteEntry(
+              type: FavoriteType.series,
+              id: s.id,
+              name: s.name,
+              imageUrl: s.coverUrl,
+            ),
             onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
               builder: (_) => ChangeNotifierProvider<ServerSessionProvider>.value(
                 value: provider,
@@ -149,8 +210,10 @@ class _PosterData {
     required this.onTap,
     this.subtitle,
     this.imageUrl,
+    this.favorite,
   });
 
+  final FavoriteEntry? favorite;
   final String title;
   final String? subtitle;
   final String? imageUrl;
@@ -158,8 +221,14 @@ class _PosterData {
 }
 
 class _Chip extends StatefulWidget {
-  const _Chip({required this.label, required this.selected, required this.onTap});
+  const _Chip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.icon,
+  });
 
+  final IconData? icon;
   final String label;
   final bool selected;
   final VoidCallback onTap;
@@ -193,12 +262,22 @@ class _ChipState extends State<_Chip> {
               width: _focused ? 3 : 2,
             ),
           ),
-          child: Text(
-            widget.label,
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              color: widget.selected ? AppColors.onAccent : Colors.white,
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.icon != null) ...[
+                Icon(widget.icon,
+                    size: 18, color: widget.selected ? AppColors.onAccent : Colors.white),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                widget.label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: widget.selected ? AppColors.onAccent : Colors.white,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -227,6 +306,9 @@ class _PosterCardState extends State<_PosterCard> {
       autofocus: widget.autofocus,
       borderRadius: BorderRadius.circular(14),
       onTap: d.onTap,
+      onLongPress: d.favorite == null
+          ? null
+          : () => toggleFavoriteWithMessage(context, d.favorite!),
       onFocusChange: (f) {
         setState(() => _focused = f);
         if (f) ensureVisibleOnFocus(context);
@@ -247,13 +329,27 @@ class _PosterCardState extends State<_PosterCard> {
                 ),
               ),
               clipBehavior: Clip.antiAlias,
-              child: d.imageUrl == null
-                  ? const _PosterFallback()
-                  : Image.network(
-                      d.imageUrl!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => const _PosterFallback(),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  d.imageUrl == null
+                      ? const _PosterFallback()
+                      : Image.network(
+                          d.imageUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const _PosterFallback(),
+                        ),
+                  if (d.favorite != null &&
+                      context
+                          .watch<ServerSessionProvider>()
+                          .isFavorite(d.favorite!.type, d.favorite!.id))
+                    const Positioned(
+                      top: 8,
+                      right: 8,
+                      child: Icon(Icons.favorite, color: AppColors.accent, size: 22),
                     ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 8),

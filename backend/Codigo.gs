@@ -13,6 +13,8 @@ const SHEETS = {
   SERVIDORES: 'Servidores',
   DISPOSITIVOS: 'Dispositivos',
   ACESSOS: 'Acessos',
+  ACESSOS_CLIENTE: 'AcessosCliente',
+  FAVORITOS: 'Favoritos',
   VERSAO: 'Versao',
   PROGRESSO: 'Progresso',
 };
@@ -24,8 +26,10 @@ const REQUIRED = {
   Servidores: ['ServidorId', 'Apelido', 'Hosts', 'StreamFormat', 'Ativo'],
   Dispositivos: ['DeviceId', 'ClienteId', 'Status', 'ExpiraEm', 'Codigo', 'CriadoEm', 'UltimoAcesso', 'Plataforma', 'VersaoApp'],
   Acessos: ['DeviceId', 'ServidorId', 'UsuarioXtream', 'SenhaXtream'],
+  AcessosCliente: ['ClienteId', 'ServidorId', 'UsuarioXtream', 'SenhaXtream'],
   Versao: ['Plataforma', 'Latest', 'MinSupported', 'UpdateUrl'],
-  Progresso: ['DeviceId', 'ServidorId', 'ItemType', 'ItemId', 'PositionS', 'DurationS', 'UpdatedAt'],
+  Progresso: ['DeviceId', 'ServidorId', 'ItemType', 'ItemId', 'PositionS', 'DurationS', 'UpdatedAt', 'ClienteId'],
+  Favoritos: ['ClienteId', 'ServidorId', 'ItemType', 'ItemId', 'Nome', 'Imagem', 'AdicionadoEm'],
 };
 
 const ITEM_TYPES = ['vod', 'episode'];
@@ -45,6 +49,8 @@ const ACTIONS = {
   check_device: checkDevice_,
   check_version: checkVersion_,
   save_progress: saveProgress_,
+  get_favorites: getFavorites_,
+  set_favorite: setFavorite_,
   get_progress: getProgress_,
 };
 
@@ -53,6 +59,7 @@ const ACTIONS = {
 function doGet(e) {
   try {
     const p = (e && e.parameter) || {};
+    if (p.page === 'admin') return adminPage_();
     if (p.schema && Number(p.schema) > SCHEMA) {
       throw new ApiError('UPGRADE_REQUIRED', 'Versão do app mais nova que a API.');
     }
@@ -132,18 +139,33 @@ function checkDevice_(p) {
   const cRow = findRow_(clientes, 'ClienteId', str_(cell_(disp, r, 'ClienteId')));
   base.cliente = { nome: cRow >= 0 ? str_(cell_(clientes, clientes.rows[cRow], 'Nome')) : '' };
 
-  // Servidores do dispositivo (Acessos ⨝ Servidores)
-  const acessos = getTable_(SHEETS.ACESSOS);
+  // Servidores: acessos do CLIENTE (vale para todos os aparelhos dele).
+  // Se o cliente não tiver nenhum, usa os acessos antigos por aparelho (Acessos).
+  const clienteId = str_(cell_(disp, r, 'ClienteId'));
   const servidores = getTable_(SHEETS.SERVIDORES);
   const srvMap = {};
   servidores.rows.forEach(function (sr) {
     srvMap[str_(cell_(servidores, sr, 'ServidorId'))] = sr;
   });
 
+  const acC = getTable_(SHEETS.ACESSOS_CLIENTE);
+  let lista = acC.rows.filter(function (ar) {
+    return clienteId && str_(cell_(acC, ar, 'ClienteId')) === clienteId;
+  }).map(function (ar) {
+    return { t: acC, r: ar };
+  });
+  if (!lista.length) {
+    const acD = getTable_(SHEETS.ACESSOS);
+    lista = acD.rows.filter(function (ar) {
+      return str_(cell_(acD, ar, 'DeviceId')) === deviceId;
+    }).map(function (ar) {
+      return { t: acD, r: ar };
+    });
+  }
+
   base.servidores = [];
-  acessos.rows.forEach(function (ar) {
-    if (str_(cell_(acessos, ar, 'DeviceId')) !== deviceId) return;
-    const sid = str_(cell_(acessos, ar, 'ServidorId'));
+  lista.forEach(function (it) {
+    const sid = str_(cell_(it.t, it.r, 'ServidorId'));
     const sr = srvMap[sid];
     if (!sr || !isYes_(cell_(servidores, sr, 'Ativo'))) return;
     const hosts = str_(cell_(servidores, sr, 'Hosts'))
@@ -155,8 +177,8 @@ function checkDevice_(p) {
       id: sid,
       apelido: str_(cell_(servidores, sr, 'Apelido')),
       hosts: hosts,
-      username: str_(cell_(acessos, ar, 'UsuarioXtream')),
-      password: str_(cell_(acessos, ar, 'SenhaXtream')),
+      username: str_(cell_(it.t, it.r, 'UsuarioXtream')),
+      password: str_(cell_(it.t, it.r, 'SenhaXtream')),
       stream_format: str_(cell_(servidores, sr, 'StreamFormat')).toLowerCase() === 'm3u8' ? 'm3u8' : 'ts',
     });
   });
@@ -184,6 +206,15 @@ function checkVersion_(p) {
   };
 }
 
+// Dono do progresso/favoritos: o CLIENTE (vale para todos os aparelhos dele).
+// Aparelho sem cliente cai no próprio DeviceId.
+function ownerOf_(deviceId) {
+  const disp = getTable_(SHEETS.DISPOSITIVOS);
+  const row = findRow_(disp, 'DeviceId', deviceId);
+  if (row < 0) return deviceId;
+  return str_(cell_(disp, disp.rows[row], 'ClienteId')) || deviceId;
+}
+
 function saveProgress_(p) {
   const deviceId = reqDeviceId_(p);
   const servidorId = reqStr_(p, 'servidor_id');
@@ -193,13 +224,15 @@ function saveProgress_(p) {
   const pos = reqInt_(p, 'position_s');
   const dur = reqInt_(p, 'duration_s');
   const now = new Date().toISOString();
+  const owner = ownerOf_(deviceId);
 
   withLock_(function () {
     const t = getTable_(SHEETS.PROGRESSO);
     let found = -1;
     for (let i = 0; i < t.rows.length; i++) {
       const r = t.rows[i];
-      if (str_(cell_(t, r, 'DeviceId')) === deviceId &&
+      const rowOwner = str_(cell_(t, r, 'ClienteId')) || str_(cell_(t, r, 'DeviceId'));
+      if (rowOwner === owner &&
           str_(cell_(t, r, 'ServidorId')) === servidorId &&
           str_(cell_(t, r, 'ItemType')) === itemType &&
           str_(cell_(t, r, 'ItemId')) === itemId) { found = i; break; }
@@ -209,9 +242,11 @@ function saveProgress_(p) {
       t.sheet.getRange(sheetRow, t.idx.PositionS + 1).setValue(pos);
       t.sheet.getRange(sheetRow, t.idx.DurationS + 1).setValue(dur);
       t.sheet.getRange(sheetRow, t.idx.UpdatedAt + 1).setValue(now);
+      t.sheet.getRange(sheetRow, t.idx.DeviceId + 1).setValue(deviceId);
+      t.sheet.getRange(sheetRow, t.idx.ClienteId + 1).setValue(owner);
     } else {
       appendObj_(t, {
-        DeviceId: deviceId, ServidorId: servidorId, ItemType: itemType,
+        DeviceId: deviceId, ClienteId: owner, ServidorId: servidorId, ItemType: itemType,
         ItemId: itemId, PositionS: pos, DurationS: dur, UpdatedAt: now,
       });
     }
@@ -222,10 +257,12 @@ function saveProgress_(p) {
 function getProgress_(p) {
   const deviceId = reqDeviceId_(p);
   const servidorId = reqStr_(p, 'servidor_id');
+  const owner = ownerOf_(deviceId);
   const t = getTable_(SHEETS.PROGRESSO);
   const items = [];
   t.rows.forEach(function (r) {
-    if (str_(cell_(t, r, 'DeviceId')) !== deviceId) return;
+    const rowOwner = str_(cell_(t, r, 'ClienteId')) || str_(cell_(t, r, 'DeviceId'));
+    if (rowOwner !== owner) return;
     if (str_(cell_(t, r, 'ServidorId')) !== servidorId) return;
     items.push({
       item_type: str_(cell_(t, r, 'ItemType')),
@@ -239,16 +276,86 @@ function getProgress_(p) {
   return { items: items.slice(0, MAX_PROGRESS_ITEMS) };
 }
 
+const FAV_TYPES = ['live', 'vod', 'series'];
+const MAX_FAVORITES = 300;
+
+function getFavorites_(p) {
+  const deviceId = reqDeviceId_(p);
+  const servidorId = reqStr_(p, 'servidor_id');
+  const owner = ownerOf_(deviceId);
+  const t = getTable_(SHEETS.FAVORITOS);
+  const items = [];
+  t.rows.forEach(function (r) {
+    if (str_(cell_(t, r, 'ClienteId')) !== owner) return;
+    if (str_(cell_(t, r, 'ServidorId')) !== servidorId) return;
+    items.push({
+      item_type: str_(cell_(t, r, 'ItemType')),
+      item_id: str_(cell_(t, r, 'ItemId')),
+      name: str_(cell_(t, r, 'Nome')),
+      image: str_(cell_(t, r, 'Imagem')),
+      added_at: isoOf_(cell_(t, r, 'AdicionadoEm')),
+    });
+  });
+  items.sort(function (a, b) { return a.added_at < b.added_at ? 1 : -1; });
+  return { items: items.slice(0, MAX_FAVORITES) };
+}
+
+// on=1 adiciona, on=0 remove. Idempotente.
+function setFavorite_(p) {
+  const deviceId = reqDeviceId_(p);
+  const servidorId = reqStr_(p, 'servidor_id');
+  const itemType = reqStr_(p, 'item_type');
+  const itemId = reqStr_(p, 'item_id');
+  if (FAV_TYPES.indexOf(itemType) < 0) throw new ApiError('BAD_REQUEST', 'item_type inválido.');
+  const on = str_(p.on) !== '0';
+  const owner = ownerOf_(deviceId);
+
+  withLock_(function () {
+    const t = getTable_(SHEETS.FAVORITOS);
+    let found = -1;
+    for (let i = 0; i < t.rows.length; i++) {
+      const r = t.rows[i];
+      if (str_(cell_(t, r, 'ClienteId')) === owner &&
+          str_(cell_(t, r, 'ServidorId')) === servidorId &&
+          str_(cell_(t, r, 'ItemType')) === itemType &&
+          str_(cell_(t, r, 'ItemId')) === itemId) { found = i; break; }
+    }
+    if (!on) {
+      if (found >= 0) t.sheet.deleteRow(found + 2);
+    } else if (found < 0) {
+      appendObj_(t, {
+        ClienteId: owner, ServidorId: servidorId, ItemType: itemType, ItemId: itemId,
+        Nome: str_(p.name).slice(0, 200), Imagem: str_(p.image).slice(0, 500),
+        AdicionadoEm: new Date().toISOString(),
+      });
+    }
+  });
+  return { on: on };
+}
+
 /* ───────────────────────── Helpers de planilha ───────────────────────── */
 
 // Lê uma aba e mapeia cabeçalho -> índice. Falha alto se faltar aba/coluna.
 function getTable_(name) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(name);
+  let sheet = SpreadsheetApp.getActive().getSheetByName(name);
+  if (!sheet && (name === SHEETS.ACESSOS_CLIENTE || name === SHEETS.FAVORITOS)) {
+    // Aba nova (acessos por cliente): criada sozinha se ainda não existir.
+    sheet = SpreadsheetApp.getActive().insertSheet(name);
+    sheet.getRange(1, 1, sheet.getMaxRows(), REQUIRED[name].length).setNumberFormat('@');
+    sheet.getRange(1, 1, 1, REQUIRED[name].length).setValues([REQUIRED[name]]).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
   if (!sheet) throw new ApiError('SCHEMA_ERROR', 'Aba ausente: ' + name);
   const values = sheet.getDataRange().getValues();
   const headers = values[0].map(function (h) { return String(h).trim(); });
   const idx = {};
   headers.forEach(function (h, i) { if (h) idx[h] = i; });
+  // Coluna nova em aba antiga: acrescenta o cabeçalho sozinho (sem perder dados).
+  if (name === SHEETS.PROGRESSO && !('ClienteId' in idx)) {
+    sheet.getRange(1, headers.length + 1).setValue('ClienteId').setFontWeight('bold');
+    SpreadsheetApp.flush();
+    return getTable_(name);
+  }
   (REQUIRED[name] || []).forEach(function (h) {
     if (!(h in idx)) throw new ApiError('SCHEMA_ERROR', 'Coluna ausente na aba ' + name + ': ' + h);
   });

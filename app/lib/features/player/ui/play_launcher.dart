@@ -18,6 +18,7 @@ Future<void> launchPlayer(
         items: items,
         initialIndex: index,
         onProgress: provider.recordProgress,
+        epgLoader: provider.epgFor,
       ),
     ),
   );

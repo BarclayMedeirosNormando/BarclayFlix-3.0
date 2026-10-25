@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../core/network/api_result.dart';
 import '../../auth/data/device_models.dart';
+import '../../favorites/data/favorites_repository.dart';
 import '../../player/data/play_item.dart';
 import '../../progress/data/progress_repository.dart';
 import '../data/xtream_client.dart';
@@ -60,10 +61,13 @@ class ServerSessionProvider extends ChangeNotifier {
     this._api,
     this.server, {
     ProgressApi progress = const NullProgressApi(),
-  }) : _progress = progress;
+    FavoritesApi favorites = const NullFavoritesApi(),
+  })  : _progress = progress,
+        _favoritesApi = favorites;
 
   final XtreamApi _api;
   final ProgressApi _progress;
+  final FavoritesApi _favoritesApi;
   final XtreamServer server;
 
   ConnectionPhase _phase = ConnectionPhase.connecting;
@@ -81,6 +85,9 @@ class ServerSessionProvider extends ChangeNotifier {
   bool _progressLoaded = false;
   Future<void>? _continueRun;
   List<ContinueEntry> _continue = const [];
+  // Minha lista: mais recente primeiro.
+  final Map<String, FavoriteEntry> _favorites = {};
+  bool _favoritesLoaded = false;
   bool _disposed = false;
 
   ConnectionPhase get phase => _phase;
@@ -130,6 +137,7 @@ class ServerSessionProvider extends ChangeNotifier {
 
     if (_phase == ConnectionPhase.ready) {
       loadContinue();
+      loadFavorites();
       await loadCategories(XtreamSection.live);
     }
   }
@@ -235,7 +243,27 @@ class ServerSessionProvider extends ChangeNotifier {
         url: _session!.liveUrl(c),
         kind: PlayKind.live,
         imageUrl: c.iconUrl,
+        epgId: c.id,
       );
+
+  /// Fila de episódios (todas as temporadas, em ordem) e a posição de [current]:
+  /// permite avançar para o próximo episódio, inclusive na virada de temporada.
+  ({List<PlayItem> items, int index}) episodeQueue(
+    String seriesId,
+    XtreamSeriesDetail d,
+    XtreamEpisode current,
+  ) {
+    final seasons = d.seasons.keys.toList()..sort();
+    final items = <PlayItem>[];
+    var index = 0;
+    for (final season in seasons) {
+      for (final e in d.seasons[season]!) {
+        if (e.id == current.id) index = items.length;
+        items.add(episodeItem(seriesId, d, e));
+      }
+    }
+    return (items: items, index: index);
+  }
 
   PlayItem movieItem(XtreamMovie m) => PlayItem(
         title: m.name,
@@ -275,6 +303,112 @@ class ServerSessionProvider extends ChangeNotifier {
 
   static bool _isPartial(ProgressEntry e) =>
       e.durationS > 0 && e.positionS >= 10 && e.positionS / e.durationS < 0.95;
+
+  // ---- Programação (EPG) -----------------------------------------------------
+
+  final Map<String, List<EpgEntry>> _epg = {};
+  final Map<String, DateTime> _epgAt = {};
+
+  /// Programação já carregada do canal (vazia se ainda não houver).
+  List<EpgEntry> epgCached(String streamId) => _epg[streamId] ?? const [];
+
+  /// Busca (e guarda por 5 minutos) a programação do canal. Nunca falha: sem
+  /// guia, devolve lista vazia.
+  Future<List<EpgEntry>> epgFor(String streamId) async {
+    final session = _session;
+    if (session == null) return const [];
+    final at = _epgAt[streamId];
+    if (at != null && DateTime.now().difference(at) < const Duration(minutes: 5)) {
+      return epgCached(streamId);
+    }
+    _epgAt[streamId] = DateTime.now();
+    final r = await _api.shortEpg(session, streamId);
+    if (_disposed) return const [];
+    _epg[streamId] = r is ApiSuccess<List<EpgEntry>> ? r.data : const [];
+    _notify();
+    return epgCached(streamId);
+  }
+
+  // ---- Busca -------------------------------------------------------------------
+
+  /// Carrega a lista completa do tipo (uma vez) para a busca local.
+  Future<void> ensureSearchData(FavoriteType type) => switch (type) {
+        FavoriteType.live => loadChannels(''),
+        FavoriteType.vod => loadMovies(''),
+        FavoriteType.series => loadSeries(''),
+      };
+
+  // ---- Minha lista -----------------------------------------------------------
+
+  List<FavoriteEntry> get favorites => _favorites.values.toList(growable: false);
+  bool get favoritesLoaded => _favoritesLoaded;
+
+  bool isFavorite(FavoriteType type, String id) => _favorites.containsKey('${type.wire}:$id');
+
+  Future<void> loadFavorites({bool force = false}) async {
+    if (_session == null || (_favoritesLoaded && !force)) return;
+    final result = await _favoritesApi.load(server.id);
+    if (_disposed) return;
+    if (result is ApiSuccess<List<FavoriteEntry>>) {
+      _favorites
+        ..clear()
+        ..addEntries([for (final f in result.data) MapEntry(f.key, f)]);
+      _favoritesLoaded = true;
+      _notify();
+    }
+  }
+
+  /// Liga/desliga o item na lista. Atualiza a tela na hora; se o servidor
+  /// recusar, desfaz. Devolve true quando o item passou a estar na lista.
+  Future<bool> toggleFavorite(FavoriteEntry entry) async {
+    final wasOn = _favorites.containsKey(entry.key);
+    if (wasOn) {
+      _favorites.remove(entry.key);
+    } else {
+      _favorites
+        ..remove(entry.key)
+        ..addAll({entry.key: entry});
+      final reordered = {entry.key: entry, ..._favorites};
+      _favorites
+        ..clear()
+        ..addAll(reordered);
+    }
+    _notify();
+    final result = await _favoritesApi.set(server.id, entry, on: !wasOn);
+    if (_disposed) return !wasOn;
+    if (result is! ApiSuccess<bool>) {
+      // Desfaz.
+      if (wasOn) {
+        _favorites[entry.key] = entry;
+      } else {
+        _favorites.remove(entry.key);
+      }
+      _notify();
+      return wasOn;
+    }
+    return !wasOn;
+  }
+
+  /// Monta o item reproduzível de um favorito (filme precisa consultar a extensão).
+  Future<PlayItem?> favoriteVodItem(FavoriteEntry f) async {
+    final session = _session;
+    if (session == null) return null;
+    final r = await _api.vodInfo(session, f.id);
+    if (r is! ApiSuccess<XtreamVodInfo>) return null;
+    return PlayItem(
+      title: f.name,
+      url: session.movieUrl(f.id, r.data.extension),
+      kind: PlayKind.vod,
+      progressId: f.id,
+      imageUrl: f.imageUrl ?? r.data.imageUrl,
+      startAt: _startFor('vod', f.id),
+    );
+  }
+
+  PlayItem? favoriteChannelItem(FavoriteEntry f) {
+    if (_session == null) return null;
+    return channelItem(XtreamChannel(id: f.id, name: f.name, iconUrl: f.imageUrl));
+  }
 
   // ---- Progresso -------------------------------------------------------------
 

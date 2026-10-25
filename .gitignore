@@ -60,3 +60,5 @@ desktop.ini
 
 # ── Logs ──
 *.log
+
+dist/

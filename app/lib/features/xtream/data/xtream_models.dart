@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../../core/network/api_result.dart';
 import '../../auth/data/device_models.dart';
 
@@ -139,9 +141,11 @@ class XtreamMovie {
     required this.extension,
     this.posterUrl,
     this.rating,
+    this.added = 0,
   });
 
   factory XtreamMovie.fromJson(JsonMap j) => XtreamMovie(
+        added: int.tryParse('${j['added'] ?? ''}') ?? 0,
         id: '${j['stream_id']}',
         name: '${j['name'] ?? ''}',
         extension: _asExtension(j['container_extension']),
@@ -154,6 +158,9 @@ class XtreamMovie {
   final String extension;
   final String? posterUrl;
   final String? rating;
+
+  /// Quando entrou no servidor (unix, segundos); 0 se desconhecido.
+  final int added;
 }
 
 /// Série (`get_series`).
@@ -165,9 +172,11 @@ class XtreamSeries {
     this.plot,
     this.rating,
     this.year,
+    this.added = 0,
   });
 
   factory XtreamSeries.fromJson(JsonMap j) => XtreamSeries(
+        added: int.tryParse('${j['last_modified'] ?? j['added'] ?? ''}') ?? 0,
         id: '${j['series_id']}',
         name: '${j['name'] ?? ''}',
         coverUrl: _asUrl(j['cover']),
@@ -182,6 +191,9 @@ class XtreamSeries {
   final String? plot;
   final String? rating;
   final String? year;
+
+  /// Última atualização no servidor (unix, segundos); 0 se desconhecido.
+  final int added;
 }
 
 /// Episódio de uma série (`get_series_info`).
@@ -342,4 +354,38 @@ String? _asYear(Object? v) {
   return s.length >= 4 && int.tryParse(s.substring(0, 4)) != null
       ? s.substring(0, 4)
       : null;
+}
+
+
+/// Programa da grade (`get_short_epg`). Título e horários vêm do painel;
+/// o título costuma chegar em base64.
+class EpgEntry {
+  const EpgEntry({required this.title, required this.start, required this.end});
+
+  static EpgEntry? fromJson(JsonMap j) {
+    final start = _asUnixDate(j['start_timestamp']);
+    final end = _asUnixDate(j['stop_timestamp'] ?? j['end_timestamp']);
+    final title = _decodeEpgText('${j['title'] ?? ''}');
+    if (start == null || end == null || title.isEmpty) return null;
+    return EpgEntry(title: title, start: start, end: end);
+  }
+
+  final String title;
+  final DateTime start;
+  final DateTime end;
+
+  bool isLiveAt(DateTime t) => !t.isBefore(start) && t.isBefore(end);
+}
+
+String _decodeEpgText(String raw) {
+  final s = raw.trim();
+  if (s.isEmpty) return '';
+  try {
+    final decoded = utf8.decode(base64.decode(base64.normalize(s)), allowMalformed: false);
+    // Texto normal que por acaso é base64 válido vira lixo: só aceita se for imprimível.
+    if (decoded.isNotEmpty && !decoded.contains('\u0000')) return decoded.trim();
+  } on FormatException {
+    // não era base64
+  }
+  return s;
 }

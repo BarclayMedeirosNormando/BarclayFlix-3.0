@@ -8,6 +8,7 @@ class PlayItem {
     required this.kind,
     this.progressId,
     this.imageUrl,
+    this.epgId,
     this.startAt = Duration.zero,
   });
 
@@ -21,6 +22,9 @@ class PlayItem {
   final String? progressId;
   final String? imageUrl;
 
+  /// Id do canal para buscar a programação (só canais ao vivo).
+  final String? epgId;
+
   /// Onde retomar (zero = do início).
   final Duration startAt;
 
@@ -32,6 +36,7 @@ class PlayItem {
         kind: kind,
         progressId: progressId,
         imageUrl: imageUrl,
+        epgId: epgId,
         startAt: start,
       );
 }
