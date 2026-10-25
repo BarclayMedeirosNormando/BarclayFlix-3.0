@@ -40,6 +40,16 @@
   .center{max-width:420px;margin:18vh auto 0;padding:0 16px}
   label.dev{display:flex;align-items:center;gap:12px;margin:8px 0 0;padding:10px 12px;border:1px solid var(--bd);border-radius:12px;background:var(--sf);color:var(--tx);font-size:15px;font-weight:600}
   label.dev input{width:22px;height:22px}label.dev small{color:var(--mut);font-weight:400}
+  .alert{border-color:var(--bad);background:#2A1215}
+  .alert .name{color:var(--bad)}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
+  .kpi{background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:10px 12px}
+  .kpi b{display:block;font-size:22px;font-weight:800}.kpi span{color:var(--mut);font-size:12px}
+  h2{font-size:15px;margin:18px 0 8px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+  .row h2{margin:0}
+  .tag.warn{color:var(--ac)}.tag.good{color:var(--ok)}.tag.err{color:var(--bad)}
+  .bar{height:6px;border-radius:3px;background:#262A33;margin-top:8px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ok)}
+  .bar.bad i{background:var(--bad)}
 </style>
 </head>
 <body>
@@ -184,7 +194,7 @@ function renderMonitor() {
   h += m.agora.length ? m.agora.map(a => { const [t, k] = EST[a.estado] || [a.estado, '']; return `
     <div class="card"><div class="row"><div class="name">${esc(a.cliente)}</div><span class="tag ${k}">${t}</span></div>
     <div class="sub">${TIPO[a.tipo] || a.tipo}: ${esc(a.nome)}</div>
-    <div class="sub">${esc(a.servidor)} · há ${fmtS((m.geradoEm - a.desde) / 1000)}${a.travadas >= 1 ? ' · ' + a.travadas + ' travada(s)' : ''}</div></div>`; }).join('')
+    <div class="sub">${esc(a.servidor)} · há ${fmtS((m.geradoEm - a.desde) / 1000)}${a.travadas >= 1 ? ' · ' + a.travadas + ' travada(s)' + (a.travadasS ? ' (' + fmtS(a.travadasS) + ' parado)' : '') : ''}</div></div>`; }).join('')
     : '<div class="sub">Ninguém assistindo no momento.</div>';
   h += `<h2>Saúde dos servidores</h2>`;
   h += m.servers.map(s => {
@@ -222,7 +232,7 @@ async function openActivity(id) {
     <div class="sub">Últimos 7 dias: ${h.reproducoes} reprodução(ões) · ${fmtS(h.segundos)} assistidos · ${h.falhas} não abriram · ${h.quedas} quedas</div>
     ${h.lista.length ? h.lista.map(x => `<div class="card"><div class="row"><div class="name">${esc(x.nome)}</div><span class="tag ${kind[x.resultado] || ''}">${x.resultado}</span></div>
       <div class="sub">${TIPO[x.tipo] || x.tipo} · ${esc(x.servidor)}</div>
-      <div class="sub">${fmtDt(x.inicio)} · ${fmtS(x.segundos)}${x.travadas ? ' · ' + x.travadas + ' travada(s)' : ''}</div></div>`).join('')
+      <div class="sub">${fmtDt(x.inicio)} · ${fmtS(x.segundos)}${x.travadas ? ' · ' + x.travadas + ' travada(s)' + (x.travadasS ? ' (' + fmtS(x.travadasS) + ' parado)' : '') : ''}</div></div>`).join('')
       : '<div class="sub" style="padding:16px 0">Sem atividade registrada (o cliente precisa estar com o app 3.0.5 ou mais novo).</div>'}
     <div class="btns"><button class="btn" onclick="closeSheet()">Fechar</button></div>`;
 }

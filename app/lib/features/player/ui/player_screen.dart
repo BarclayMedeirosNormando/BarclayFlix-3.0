@@ -96,6 +96,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   _Playback? _pb;
   Timer? _openTimeout;
   Timer? _beatTimer;
+  Timer? _stallTimer;
   StreamSubscription<bool>? _playingSub;
   DateTime _seekedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -298,18 +299,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _endPlayback() {
     final pb = _pb;
     if (pb == null || pb.ended) return;
+    _endStall(pb);
     pb.ended = true;
     _openTimeout?.cancel();
     pb.watch.stop();
     _tlog(pb, 'stop',
         v1: pb.watch.elapsed.inSeconds,
         v2: pb.stalls,
-        detail: pb.ok || pb.failed ? '' : 'abandon');
+        detail: pb.ok || pb.failed ? pb.stallDetail : 'abandon');
     _pb = null;
   }
 
-  /// Primeiro "parou de carregar" = abriu. Depois, cada parada conta como travada
-  /// (menos as causadas por pular no vídeo).
+  /// Primeiro "parou de carregar" = abriu. Depois, só conta como travada uma parada
+  /// de [_stallMin] ou mais (engasgos curtos, comuns no início de canais, não contam)
+  /// e que não tenha sido causada por pular no vídeo.
+  static const Duration _stallMin = Duration(seconds: 2);
+
   void _trackBuffering(bool buffering) {
     final pb = _pb;
     if (pb == null || pb.ended) return;
@@ -318,13 +323,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
         pb.ok = true;
         _openTimeout?.cancel();
         _tlog(pb, 'ok', v1: DateTime.now().difference(pb.started).inSeconds);
+      } else {
+        _endStall(pb);
       }
     } else if (pb.ok && !pb.failed) {
       if (DateTime.now().difference(_seekedAt) < const Duration(seconds: 4)) return;
-      pb.stalls++;
-      if (pb.stalls == 3) _tlog(pb, 'stall', v1: pb.stalls);
+      pb.stallSince = DateTime.now();
+      pb.stallCounted = false;
+      _stallTimer?.cancel();
+      _stallTimer = Timer(_stallMin, () {
+        if (!identical(_pb, pb) || pb.ended || pb.stallSince == null) return;
+        pb.stallCounted = true;
+        pb.stalls++;
+        if (pb.stalls == 3) _tlog(pb, 'stall', v1: pb.stalls);
+      });
     }
     _syncWatch();
+  }
+
+  /// Fim de uma parada: soma o tempo parado se ela passou do mínimo.
+  void _endStall(_Playback pb) {
+    _stallTimer?.cancel();
+    final since = pb.stallSince;
+    if (since != null && pb.stallCounted) {
+      pb.stallMs += DateTime.now().difference(since).inMilliseconds;
+    }
+    pb.stallSince = null;
+    pb.stallCounted = false;
   }
 
   /// Conta tempo assistido só com o vídeo rodando de verdade.
@@ -342,7 +367,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _heartbeat() {
     final pb = _pb;
     if (pb == null || !pb.ok || pb.failed || pb.ended) return;
-    _tlog(pb, 'hb', v1: pb.watch.elapsed.inSeconds, v2: pb.stalls);
+    _tlog(pb, 'hb', v1: pb.watch.elapsed.inSeconds, v2: pb.stalls, detail: pb.stallDetail);
   }
 
   void _go(int delta) {
@@ -461,6 +486,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _saveTimer?.cancel();
     _beatTimer?.cancel();
     _openTimeout?.cancel();
+    _stallTimer?.cancel();
     _hideTimer?.cancel();
     _hintTimer?.cancel();
     _nextTimer?.cancel();
@@ -958,5 +984,13 @@ class _Playback {
   /// Já reportado como `fail` (não abriu) ou `drop` (caiu).
   bool failed = false;
   bool ended = false;
+
+  /// Paradas de 2 s ou mais (engasgos curtos não contam) e o tempo total parado.
   int stalls = 0;
+  int stallMs = 0;
+  DateTime? stallSince;
+  bool stallCounted = false;
+
+  /// Tempo parado em segundos, no formato lido pelo painel (`st=12`).
+  String get stallDetail => stalls == 0 ? '' : 'st=${(stallMs / 1000).round()}';
 }
