@@ -18,7 +18,10 @@ sealed class ApiResult<T> {
   String? get failureMessage => switch (this) {
         ApiSuccess<T>() => null,
         ApiError<T>(:final code, :final message) => _apiErrorMessage(code, message),
-        ApiNetworkError<T>() => 'Sem conexão com o servidor. Verifique a internet.',
+        ApiNetworkError<T>(:final message) => message.isEmpty
+            ? 'Sem conexão com o servidor. Verifique a internet.'
+            // Só o código HTTP ou o tipo da exceção (nunca a URL).
+            : 'Sem conexão com o servidor. Verifique a internet. ($message)',
         ApiTimeout<T>() => 'O servidor demorou para responder.',
         ApiBadPayload<T>() => 'Resposta inesperada do servidor.',
       };

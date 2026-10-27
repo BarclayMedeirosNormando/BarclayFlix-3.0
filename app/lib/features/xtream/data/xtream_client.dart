@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:isolate';
 
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 
 import '../../../core/cache/list_cache.dart';
 import '../../../core/network/api_result.dart';
@@ -71,10 +73,21 @@ class XtreamClient implements XtreamApi, XtreamCachedLists {
     this.authTimeout = const Duration(seconds: 12),
     this.listTimeout = const Duration(seconds: 30),
     ListCache? cache,
-  })  : _http = httpClient ?? http.Client(),
+  })  : _http = httpClient ?? _lenientClient(),
         _cache = cache;
 
   final ListCache? _cache;
+
+  /// Painéis de IPTV costumam ter certificado HTTPS vencido, autoassinado ou de outro
+  /// domínio (e redirecionam o http para ele). O navegador deixa passar; o Dart recusa
+  /// com `HandshakeException`. Este cliente só fala com os servidores do próprio
+  /// usuário, que já usam http puro, então aceitar o certificado não expõe mais nada.
+  static http.Client _lenientClient() {
+    final inner = HttpClient();
+    inner.connectionTimeout = const Duration(seconds: 15);
+    inner.badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+    return IOClient(inner);
+  }
 
   final Duration authTimeout;
   final Duration listTimeout;
@@ -88,6 +101,14 @@ class XtreamClient implements XtreamApi, XtreamCachedLists {
     if (h.isEmpty) return null;
     if (!h.contains('://')) h = 'http://$h';
     h = h.replaceAll(RegExp(r'/+$'), '');
+    // Quem cadastra costuma colar o link inteiro (`.../player_api.php?...` ou `.../get.php`):
+    // fica só o endereço base, porque o app acrescenta o caminho da API.
+    h = h
+        .replaceFirst(
+          RegExp(r'/(player_api|get|panel_api|xmltv)\.php(\?.*)?$', caseSensitive: false),
+          '',
+        )
+        .replaceAll(RegExp(r'/+$'), '');
     final uri = Uri.tryParse(h);
     if (uri == null || uri.host.isEmpty) return null;
     return uri;
@@ -102,13 +123,24 @@ class XtreamClient implements XtreamApi, XtreamCachedLists {
         last = const ApiBadPayload<XtreamSession>('Endereço de servidor inválido.');
         continue;
       }
-      final result = await _authenticate(server, base);
-      if (result is ApiSuccess<XtreamSession>) return result;
-      // Credenciais recusadas: outro DNS do mesmo painel não vai mudar isso.
-      if (result is ApiError<XtreamSession>) return result;
-      last = result;
+      for (final candidate in _variants(base)) {
+        final result = await _authenticate(server, candidate);
+        if (result is ApiSuccess<XtreamSession>) return result;
+        // Credenciais recusadas: outro DNS do mesmo painel não vai mudar isso.
+        if (result is ApiError<XtreamSession>) return result;
+        last = result;
+      }
     }
     return last ?? const ApiBadPayload<XtreamSession>('Servidor sem endereço.');
+  }
+
+  /// O endereço como foi cadastrado e, se falhar, o mesmo com http↔https: há painéis
+  /// que só atendem em um dos dois, e o DNS informado ao cliente nem sempre é o certo.
+  /// Só vale sem porta explícita (com porta, o esquema não se adivinha).
+  static List<Uri> _variants(Uri base) {
+    if (base.hasPort || (base.scheme != 'http' && base.scheme != 'https')) return [base];
+    final other = base.scheme == 'https' ? 'http' : 'https';
+    return [base, base.replace(scheme: other)];
   }
 
   @override
@@ -379,11 +411,21 @@ class XtreamClient implements XtreamApi, XtreamCachedLists {
         },
       );
 
+  /// Painéis Xtream (XUI) costumam recusar o nome padrão do Dart; players de IPTV
+  /// se identificam assim e são aceitos.
+  static const Map<String, String> _headers = {
+    'User-Agent': 'VLC/3.0.20 LibVLC/3.0.20',
+    'Accept': '*/*',
+  };
+
+  /// Esquema, host, porta e caminho (sem usuário e senha) para a mensagem de erro.
+  static String _where(Uri uri) => '${uri.scheme}://${uri.host}:${uri.port}${uri.path}';
+
   Future<ApiResult<Object?>> _getJson(Uri uri, Duration timeout) async {
     try {
-      final response = await _http.get(uri).timeout(timeout);
+      final response = await _http.get(uri, headers: _headers).timeout(timeout);
       if (response.statusCode != 200) {
-        return ApiNetworkError<Object?>('HTTP ${response.statusCode}');
+        return ApiNetworkError<Object?>('HTTP ${response.statusCode} · ${_where(uri)}');
       }
       final body = utf8.decode(response.bodyBytes, allowMalformed: true);
       try {
@@ -399,7 +441,7 @@ class XtreamClient implements XtreamApi, XtreamCachedLists {
       return ApiTimeout<Object?>();
     } on Exception catch (e) {
       // Só o tipo: a mensagem da exceção pode conter a URL com a senha.
-      return ApiNetworkError<Object?>(e.runtimeType.toString());
+      return ApiNetworkError<Object?>('${e.runtimeType} · ${_where(uri)}');
     }
   }
 
