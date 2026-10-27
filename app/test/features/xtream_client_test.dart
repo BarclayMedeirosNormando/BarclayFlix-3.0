@@ -105,8 +105,35 @@ void main() {
 
     final r = await client.connect(server(['http://a.xyz', 'http://b.xyz']));
 
-    expect(hosts, ['a.xyz', 'b.xyz']);
+    // Cada host é tentado em http e depois em https antes de passar para o próximo.
+    expect(hosts, ['a.xyz', 'a.xyz', 'b.xyz']);
     expect(r.dataOrNull?.baseUri.host, 'b.xyz');
+  });
+
+  test('se o http falhar, tenta o mesmo host em https e usa o que funcionou', () async {
+    final schemes = <String>[];
+    final client = clientWith((req) async {
+      schemes.add(req.url.scheme);
+      if (req.url.scheme == 'http') throw http.ClientException('porta 80 fechada');
+      return jsonResponse(authBody());
+    });
+
+    final r = await client.connect(server(['http://a.xyz']));
+
+    expect(schemes, ['http', 'https']);
+    expect(r.dataOrNull?.baseUri.toString(), 'https://a.xyz');
+  });
+
+  test('com porta explícita não troca o esquema', () async {
+    final urls = <String>[];
+    final client = clientWith((req) async {
+      urls.add(req.url.scheme);
+      throw http.ClientException('x');
+    });
+
+    await client.connect(server(['http://a.xyz:8080']));
+
+    expect(urls, ['http']);
   });
 
   test('credenciais recusadas (auth 0) não tentam outro host', () async {
