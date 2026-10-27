@@ -8,6 +8,7 @@ import 'package:http/io_client.dart';
 
 import '../../../core/cache/list_cache.dart';
 import '../../../core/network/api_result.dart';
+import '../../../core/network/dns_fallback.dart';
 import '../../auth/data/device_models.dart';
 import 'xtream_models.dart';
 
@@ -123,6 +124,8 @@ class XtreamClient implements XtreamApi, XtreamCachedLists {
         last = const ApiBadPayload<XtreamSession>('Endereço de servidor inválido.');
         continue;
       }
+      // O certificado deste servidor pode ser aceito mesmo inválido (ver [TlsTrust]).
+      TlsTrust.allow(base.host);
       for (final candidate in _variants(base)) {
         final result = await _authenticate(server, candidate);
         if (result is ApiSuccess<XtreamSession>) return result;
@@ -441,7 +444,9 @@ class XtreamClient implements XtreamApi, XtreamCachedLists {
       return ApiTimeout<Object?>();
     } on Exception catch (e) {
       // Só o tipo: a mensagem da exceção pode conter a URL com a senha.
-      return ApiNetworkError<Object?>('${e.runtimeType} · ${_where(uri)}');
+      // Marca falha de DNS (o nome do servidor não resolve nesta rede) sem copiar o texto.
+      final dns = e.toString().contains('Failed host lookup') ? ' (DNS)' : '';
+      return ApiNetworkError<Object?>('${e.runtimeType}$dns · ${_where(uri)}');
     }
   }
 

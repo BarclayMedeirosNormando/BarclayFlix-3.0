@@ -7,6 +7,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../../core/format.dart';
+import '../../../core/network/dns_fallback.dart';
 import '../../../core/settings/video_settings.dart';
 import '../../../core/telemetry/telemetry.dart';
 import '../../xtream/data/xtream_models.dart' show EpgEntry;
@@ -243,8 +244,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
       await _tuneForWeakDevices();
       final start = _resumeAt ?? _item.startAt;
       _resumeAt = null;
+      // Se o DNS da operadora bloquear o servidor, o player recebe o IP + cabeçalho Host.
+      final target = await DnsFallback.instance.forPlayback(_item.url);
       await _player.open(
-        Media(_item.url.toString(), start: start > Duration.zero ? start : null),
+        Media(
+          target.url.toString(),
+          httpHeaders: target.headers,
+          start: start > Duration.zero ? start : null,
+        ),
       );
     } catch (_) {
       // Sem detalhes: a URL leva usuário e senha.

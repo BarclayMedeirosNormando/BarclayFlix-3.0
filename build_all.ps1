@@ -28,6 +28,12 @@ $apkDir = Join-Path $app 'build\app\outputs\flutter-apk'
 Copy-Item "$apkDir\app-armeabi-v7a-release.apk" "$dist\BarclayFlix-$ver-TV-antiga-32bit.apk" -Force
 Copy-Item "$apkDir\app-arm64-v8a-release.apk"   "$dist\BarclayFlix-$ver-Celular-TV-nova-64bit.apk" -Force
 
+# Nomes fixos para a release do GitHub: o link .../releases/latest/download/<nome> nunca muda.
+$gh = Join-Path $dist 'github'
+New-Item -ItemType Directory -Force -Path $gh | Out-Null
+Copy-Item "$apkDir\app-armeabi-v7a-release.apk" "$gh\BarclayFlix-armeabi-v7a.apk" -Force
+Copy-Item "$apkDir\app-arm64-v8a-release.apk"   "$gh\BarclayFlix-arm64-v8a.apk" -Force
+
 $zip = "$dist\BarclayFlix-$ver-Windows.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path "$app\build\windows\x64\runner\Release\*" -DestinationPath $zip

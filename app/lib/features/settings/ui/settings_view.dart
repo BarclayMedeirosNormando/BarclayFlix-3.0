@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../core/settings/video_settings.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../version/state/version_provider.dart';
+import '../../version/ui/update_panel.dart';
 
 /// Conteúdo das configurações (usado na aba "Ajustes" e na tela avulsa).
 class SettingsView extends StatelessWidget {
@@ -70,11 +71,16 @@ class SettingsView extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text(
                     'Há uma versão nova disponível.'
-                    '${version.info.updateUrl.isEmpty ? ' Fale com o administrador.' : '\nBaixe em: ${version.info.updateUrl}'}',
+                    '${version.info.updateUrl.isEmpty ? ' Fale com o administrador.' : ''}',
                     style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.w700),
                   ),
-                )
-              else if (version.checkedOnce)
+                ),
+              if (version.updateAvailable && version.info.updateUrl.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: UpdatePanel(url: version.info.updateUrl),
+                ),
+              if (!version.updateAvailable && version.checkedOnce)
                 const Padding(
                   padding: EdgeInsets.only(bottom: 8),
                   child: Text('Você está na versão mais recente.',
