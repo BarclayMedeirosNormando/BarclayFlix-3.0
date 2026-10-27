@@ -14,6 +14,7 @@ import 'features/favorites/data/favorites_repository.dart';
 import 'features/home/ui/home_placeholder_screen.dart';
 import 'features/progress/data/progress_repository.dart';
 import 'features/version/data/version_repository.dart';
+import 'features/version/ui/update_panel.dart';
 import 'features/version/state/version_provider.dart';
 import 'features/xtream/data/xtream_client.dart';
 
@@ -91,7 +92,10 @@ class AuthGate extends StatelessWidget {
         title: 'Atualização necessária',
         message: 'Esta versão (${version.current}) não é mais aceita. '
             'Instale a versão ${version.info.minSupported.isEmpty ? 'mais nova' : version.info.minSupported}.'
-            '${version.info.updateUrl.isEmpty ? '\nFale com o administrador.' : '\nBaixe em: ${version.info.updateUrl}'}',
+            '${version.info.updateUrl.isEmpty ? '\nFale com o administrador.' : ''}',
+        extra: version.info.updateUrl.isEmpty
+            ? null
+            : UpdatePanel(url: version.info.updateUrl, autofocus: true),
         actionLabel: 'Verificar de novo',
         onAction: version.check,
       );

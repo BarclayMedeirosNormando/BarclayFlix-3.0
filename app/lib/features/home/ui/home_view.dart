@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/focus_ring.dart';
 import '../../player/ui/play_launcher.dart';
 import '../../version/state/version_provider.dart';
+import '../../version/ui/update_panel.dart';
 import '../../xtream/data/xtream_models.dart';
 import '../../xtream/state/server_session_provider.dart';
 import '../../xtream/ui/live_view.dart';
@@ -374,18 +375,28 @@ class _UpdateBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.accent, width: 2),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.system_update, color: AppColors.accent),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Nova versão $latest disponível (você tem $current).'
-              '${url.isEmpty ? ' Fale com o administrador.' : '  Baixe em: $url'}',
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
+          Row(
+            children: [
+              const Icon(Icons.system_update, color: AppColors.accent),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Nova versão $latest disponível (você tem $current).'
+                  '${url.isEmpty ? ' Fale com o administrador.' : ''}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+              TextButton(style: focusRingStyle(), onPressed: onDismiss, child: const Text('Depois')),
+            ],
           ),
-          TextButton(style: focusRingStyle(), onPressed: onDismiss, child: const Text('Depois')),
+          if (url.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(36, 4, 8, 4),
+              child: UpdatePanel(url: url),
+            ),
         ],
       ),
     );

@@ -9,6 +9,7 @@ class StatusScreen extends StatelessWidget {
     required this.message,
     this.actionLabel,
     this.onAction,
+    this.extra,
   });
 
   final IconData icon;
@@ -16,6 +17,9 @@ class StatusScreen extends StatelessWidget {
   final String message;
   final String? actionLabel;
   final VoidCallback? onAction;
+
+  /// Conteúdo extra abaixo da mensagem (ex.: botão de atualizar).
+  final Widget? extra;
 
   @override
   Widget build(BuildContext context) {
@@ -35,10 +39,11 @@ class StatusScreen extends StatelessWidget {
                   Text(title, style: theme.textTheme.headlineSmall),
                   const SizedBox(height: 12),
                   Text(message, textAlign: TextAlign.center),
+                  if (extra != null) ...[const SizedBox(height: 20), extra!],
                   if (actionLabel != null && onAction != null) ...[
                     const SizedBox(height: 24),
                     FilledButton(
-                      autofocus: true,
+                      autofocus: extra == null,
                       onPressed: onAction,
                       child: Text(actionLabel!),
                     ),

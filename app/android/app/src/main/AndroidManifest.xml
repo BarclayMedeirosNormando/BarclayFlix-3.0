@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Necessário em release (o Flutter só inclui INTERNET nos manifests debug/profile). -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Atualização dentro do app: abre o instalador do APK baixado. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
     <!-- Android TV: sem touchscreen e com Leanback opcionais, para instalar também em celular. -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
