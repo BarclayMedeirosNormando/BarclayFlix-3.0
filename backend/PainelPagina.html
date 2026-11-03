@@ -215,7 +215,7 @@ function renderMonitor() {
     `<button class="chip ${k === MONTOP ? 'on' : ''}" onclick="MONTOP='${k}';render()">${n}</button>`).join('')}</div>`;
   const top = m.tops[MONTOP] || [];
   h += top.length ? top.map((t, i) => `<div class="card"><div class="row"><div class="name">${i + 1}. ${esc(t.nome)}</div></div>
-    <div class="sub">${fmtS(t.segundos)} assistidos · ${t.vezes} vez(es) · ${t.clientes} cliente(s)</div></div>`).join('')
+    <div class="sub">${fmtS(t.segundos)} assistidos · ${t.vezes} vez(es) · ${t.clientes} cliente(s)${t.quem && t.quem.length ? ': ' + esc(t.quem.join(', ')) + (t.clientes > t.quem.length ? '…' : '') : ''}</div></div>`).join('')
     : '<div class="sub">Sem dados ainda.</div>';
   return h;
 }
