@@ -7,14 +7,14 @@
  * canais com problema, mais assistidos e histórico por cliente.
  *
  * Privacidade: só ids e nomes de itens. Nunca usuário, senha ou endereço do servidor.
- * Retenção: 30 dias (limpeza automática, sem precisar de gatilho).
+ * Retenção: 10 dias (limpeza automática, sem precisar de gatilho).
  */
 
 const EV_SHEET = 'Eventos';
 const EV_COLS = ['Ts', 'DeviceId', 'ClienteId', 'Sessao', 'ServidorId', 'Evento', 'Tipo', 'ItemId', 'Nome', 'V1', 'V2', 'Detalhe'];
 // Texto simples nas colunas de ids/nomes: evita "12:345" virar hora e "007" virar 7.
 const EV_FORMATS = ['0', '@', '@', '@', '@', '@', '@', '@', '@', '0', '0', '@'];
-const EV_KEEP_DAYS = 30;
+const EV_KEEP_DAYS = 10;
 const EV_MAX_ROWS = 60000;
 const EV_READ_MAX = 40000;
 const EV_MAX_PER_CALL = 10;
@@ -110,7 +110,7 @@ function maybeCleanEventos_() {
   try { limparEventosAntigos(); } catch (e) { console.error((e && e.stack) || e); }
 }
 
-/** Apaga eventos com mais de 30 dias e, se passar de 60 mil linhas, os mais antigos. */
+/** Apaga eventos com mais de 10 dias e, se passar de 60 mil linhas, os mais antigos. */
 function limparEventosAntigos() {
   const sh = eventosSheet_();
   const last = sh.getLastRow();
@@ -258,11 +258,13 @@ function adminMonitor(key) {
     const t = tg[k] = tg[k] || { tipo: p.tipo, nome: p.nome, vezes: 0, segundos: 0, clientes: {} };
     t.vezes++;
     t.segundos += p.watched;
-    t.clientes[p.cliente || p.device] = true;
+    const who = p.cliente || p.device;
+    t.clientes[who] = (t.clientes[who] || 0) + p.watched;
   });
   Object.keys(tg).forEach(function (k) {
     const t = tg[k];
-    tops[t.tipo].push({ nome: t.nome, vezes: t.vezes, segundos: t.segundos, clientes: Object.keys(t.clientes).length });
+    const quem = Object.keys(t.clientes).sort(function (a, b) { return t.clientes[b] - t.clientes[a]; });
+    tops[t.tipo].push({ nome: t.nome, vezes: t.vezes, segundos: t.segundos, clientes: quem.length, quem: quem.slice(0, 6) });
   });
   Object.keys(tops).forEach(function (t) {
     tops[t].sort(function (a, b) { return b.segundos - a.segundos; });

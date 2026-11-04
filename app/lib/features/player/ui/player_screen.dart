@@ -11,6 +11,7 @@ import '../../../core/network/dns_fallback.dart';
 import '../../../core/settings/video_settings.dart';
 import '../../../core/telemetry/telemetry.dart';
 import '../../xtream/data/xtream_models.dart' show EpgEntry;
+import '../data/live_format.dart';
 import '../data/play_item.dart';
 
 /// Chamado com a posição atual (a cada ~30 s e ao sair) em filmes e episódios.
@@ -55,7 +56,7 @@ class PlayerScreen extends StatefulWidget {
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
-class _PlayerScreenState extends State<PlayerScreen> {
+class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver {
   late final Player _player = Player(
     configuration: PlayerConfiguration(
       // Aparelho fraco (modo leve): buffer menor para não faltar memória.
@@ -101,23 +102,72 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription<bool>? _playingSub;
   DateTime _seekedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
+  // ---- Reconexão do ao vivo (3.0.12) -------------------------------------------
+  /// Formato que funcionou depois de uma queda, por servidor (vale até fechar o app).
+  static final Map<String, String> _goodExt = {};
+
+  /// Espera (s) antes de cada nova tentativa depois de uma queda.
+  static const List<int> _retryDelays = [1, 2, 4, 6, 8, 8];
+  static const String _noSignal = 'Sem sinal. Reconectando…';
+  // Depois das tentativas rápidas, segue tentando a cada 15 s (até 20 vezes) sozinho.
+  int _slowTries = 0;
+  int _retry = 0;
+  bool _didRetry = false;
+  String _baseExt = '';
+  String? _ext; // formato forçado no canal atual (null = o do item / o lembrado)
+  String? _status; // "Reconectando…" na tela
+  Timer? _retryTimer;
+  Timer? _stableTimer;
+  Timer? _watchTimer;
+  Duration _lastPos = Duration.zero;
+  DateTime _lastMove = DateTime.now();
+  DateTime? _bgAt;
+  DateTime _ignoreUntil = DateTime.fromMillisecondsSinceEpoch(0);
+
+  bool get _ignoring => DateTime.now().isBefore(_ignoreUntil);
+
+  /// URL a tocar: no ao vivo, aplica o formato forçado ou o que já funcionou neste servidor.
+  Uri _target() {
+    final base = _item.url;
+    if (!_item.isLive) return base;
+    final want = _ext ?? _goodExt[widget.serverId];
+    if (want == null || want.isEmpty || want == urlExtension(base)) return base;
+    return withUrlExtension(base, want);
+  }
+
+  String get _curExt => urlExtension(_target());
+
   PlayItem get _item => widget.items[_index];
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _player.stream.error.listen((e) {
+      // Ao vivo: tenta reconectar sozinho (só mostra erro se todas as tentativas falharem).
+      if (_item.isLive) {
+        if (!_ignoring) _onLiveDown('erro', extra: httpCodeTag(e));
+        return;
+      }
       _failPlayback('erro');
       if (mounted) setState(() => _error = 'Não foi possível reproduzir este item.');
     });
     _completedSub = _player.stream.completed.listen((done) {
       // Canal ao vivo "terminar" = a transmissão caiu.
-      if (done && _pb?.item.isLive == true) _failPlayback('fim');
+      if (done && _item.isLive) {
+        if (!_ignoring) _onLiveDown('fim');
+        return;
+      }
       if (done && mounted) _onCompleted();
     });
     _player.stream.buffering.listen((b) {
-      if (mounted) setState(() => _buffering = b);
+      if (mounted) {
+        setState(() {
+          _buffering = b;
+          if (!b) _status = null;
+        });
+      }
       _trackBuffering(b);
       if (b) _onStall();
     });
@@ -164,6 +214,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await native.setProperty('cache', 'yes');
         await native.setProperty('demuxer-readahead-secs', _item.isLive ? '10' : '30');
         await native.setProperty('network-timeout', '15');
+        // Ao vivo em ts: o FFmpeg reabre a conexão quando o servidor corta o fluxo.
+        // Em m3u8 NÃO: a playlist é um arquivo finito e `reconnect_at_eof` a reabriria
+        // sem parar (a imagem nunca começava).
+        await native.setProperty(
+          'stream-lavf-o',
+          _item.isLive && _curExt != 'm3u8'
+              ? 'reconnect=1,reconnect_streamed=1,reconnect_at_eof=1,reconnect_delay_max=4'
+              : '',
+        );
       }
     } catch (_) {
       // Ajuste opcional: se falhar, segue com o padrão.
@@ -228,24 +287,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (_nextIn != 0 && mounted) setState(() => _nextIn = 0);
   }
 
-  Future<void> _open() async {
+  /// Abre o item atual. [retry] = reabertura automática do ao vivo (mantém a contagem
+  /// de tentativas e o guia de programação); sem ele é uma abertura nova.
+  Future<void> _open({bool retry = false}) async {
     _cancelNext();
-    _beginPlayback();
+    if (!retry) {
+      _retryTimer?.cancel();
+      _stableTimer?.cancel();
+      _retry = 0;
+      _slowTries = 0;
+      _didRetry = false;
+      _ext = null;
+      _status = null;
+    }
+    if (retry) _ignoreUntil = DateTime.now().add(const Duration(seconds: 2));
+    _beginPlayback(retry: retry);
     _stalls.clear();
     _boosted = false;
     setState(() {
       _error = null;
       _buffering = true;
-      _epg = const [];
+      if (!retry) _epg = const [];
     });
-    _loadEpg();
+    if (!retry) _loadEpg();
     _poke();
     try {
       await _tuneForWeakDevices();
       final start = _resumeAt ?? _item.startAt;
       _resumeAt = null;
       // Se o DNS da operadora bloquear o servidor, o player recebe o IP + cabeçalho Host.
-      final target = await DnsFallback.instance.forPlayback(_item.url);
+      final target = await DnsFallback.instance.forPlayback(_target());
+      // Avisos atrasados da conexão antiga não contam como queda da nova.
+      if (retry) _ignoreUntil = DateTime.now().add(const Duration(seconds: 2));
       await _player.open(
         Media(
           target.url.toString(),
@@ -255,8 +328,112 @@ class _PlayerScreenState extends State<PlayerScreen> {
       );
     } catch (_) {
       // Sem detalhes: a URL leva usuário e senha.
+      if (_item.isLive) {
+        _onLiveDown('erro');
+        return;
+      }
       _failPlayback('erro');
       if (mounted) setState(() => _error = 'Não foi possível reproduzir este item.');
+    }
+  }
+
+  // ---- Reconexão do ao vivo --------------------------------------------------
+
+  /// O canal ao vivo caiu (erro, fim do fluxo ou não abriu a tempo): registra a queda
+  /// e tenta de novo, uma conexão por vez. Depois de 2 falhas no mesmo formato, alterna
+  /// ts ↔ m3u8; se o outro formato resolver, ele é lembrado para este servidor.
+  void _onLiveDown(String reason, {String extra = ''}) {
+    if (!mounted || _retryTimer?.isActive == true) return;
+    _failPlayback('$reason $_curExt$extra');
+    _stableTimer?.cancel();
+    if (_retry >= _retryDelays.length) {
+      setState(() {
+        _status = null;
+        _buffering = false;
+        _error = 'Sem sinal deste canal. Tente novamente.';
+      });
+      if (_slowTries < 20) {
+        _slowTries++;
+        _retryTimer = Timer(const Duration(seconds: 15), () {
+          if (mounted) _open(retry: true);
+        });
+      }
+      return;
+    }
+    if (_retry == 0) _baseExt = _curExt;
+    final delay = _retryDelays[_retry];
+    _retry++;
+    _didRetry = true;
+    // Tentativas 1-2: mesmo formato; 3-4: o outro; 5-6: volta ao primeiro.
+    final useOther = ((_retry - 1) ~/ 2).isOdd;
+    if (_baseExt.isNotEmpty) _ext = useOther ? otherLiveFormat(_baseExt) : _baseExt;
+    setState(() {
+      _status = 'Reconectando… ($_retry/${_retryDelays.length})';
+      _buffering = true;
+      _error = null;
+    });
+    _retryTimer = Timer(Duration(seconds: delay), () {
+      if (mounted) _open(retry: true);
+    });
+  }
+
+  /// Vigia o ao vivo: abriu mas a imagem não anda por 25 s (sem erro do player)
+  /// conta como queda e entra na mesma reconexão.
+  void _startWatch(_Playback pb) {
+    _watchTimer?.cancel();
+    _lastPos = _player.state.position;
+    _lastMove = DateTime.now();
+    _watchTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (!mounted || !identical(_pb, pb) || pb.failed || pb.ended) {
+        timer.cancel();
+        return;
+      }
+      final pos = _player.state.position;
+      if (pos != _lastPos || !_player.state.playing || _bgAt != null) {
+        _lastPos = pos;
+        _lastMove = DateTime.now();
+        if (_status == _noSignal && mounted) setState(() => _status = null);
+        return;
+      }
+      final idle = DateTime.now().difference(_lastMove);
+      if (idle >= const Duration(seconds: 15)) {
+        timer.cancel();
+        _onLiveDown('sem imagem');
+      } else if (idle >= const Duration(seconds: 8) && _status == null && mounted) {
+        setState(() => _status = _noSignal);
+      }
+    });
+  }
+
+  /// Passou 30 s tocando depois de uma reconexão: zera as tentativas e guarda o formato.
+  void _armStable(_Playback pb) {
+    _stableTimer?.cancel();
+    if (!_didRetry && _retry == 0) return;
+    _stableTimer = Timer(const Duration(seconds: 30), () {
+      if (!identical(_pb, pb) || pb.failed || pb.ended) return;
+      if (_didRetry) _goodExt[widget.serverId] = _curExt;
+      _retry = 0;
+      _slowTries = 0;
+      _didRetry = false;
+    });
+  }
+
+  /// Voltou do descanso/segundo plano: o fluxo ao vivo ficou velho, reabre no ponto atual.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_item.isLive) return;
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _bgAt ??= DateTime.now();
+    } else if (state == AppLifecycleState.resumed) {
+      final since = _bgAt;
+      _bgAt = null;
+      if (since == null || !mounted) return;
+      if (DateTime.now().difference(since) < const Duration(seconds: 15)) return;
+      _retryTimer?.cancel();
+      _retry = 0;
+      _didRetry = false;
+      setState(() => _status = 'Retomando o canal…');
+      _open(retry: true);
     }
   }
 
@@ -282,14 +459,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   /// Nova reprodução: encerra a anterior, avisa o início e arma o prazo de abertura.
-  void _beginPlayback() {
+  void _beginPlayback({bool retry = false}) {
     _endPlayback();
     if (widget.telemetry == null) return;
     final pb = _pb = _Playback(_newSessionId(), _item);
-    _tlog(pb, 'start');
+    // Reabertura automática: o detalhe diz a tentativa e o formato (ex.: `rc3 m3u8`).
+    _tlog(pb, 'start', detail: retry ? 'rc$_retry $_curExt' : '');
     _openTimeout?.cancel();
     _openTimeout = Timer(Duration(seconds: pb.item.isLive ? 20 : 30), () {
-      if (identical(_pb, pb) && !pb.ok) _failPlayback('timeout');
+      if (!identical(_pb, pb) || pb.ok) return;
+      if (pb.item.isLive) {
+        _onLiveDown('timeout');
+      } else {
+        _failPlayback('timeout');
+      }
     });
   }
 
@@ -309,6 +492,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _endStall(pb);
     pb.ended = true;
     _openTimeout?.cancel();
+    _watchTimer?.cancel();
     pb.watch.stop();
     _tlog(pb, 'stop',
         v1: pb.watch.elapsed.inSeconds,
@@ -330,6 +514,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         pb.ok = true;
         _openTimeout?.cancel();
         _tlog(pb, 'ok', v1: DateTime.now().difference(pb.started).inSeconds);
+        if (pb.item.isLive) {
+          _armStable(pb);
+          _startWatch(pb);
+        }
       } else {
         _endStall(pb);
       }
@@ -489,6 +677,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _retryTimer?.cancel();
+    _stableTimer?.cancel();
+    _watchTimer?.cancel();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _saveTimer?.cancel();
     _beatTimer?.cancel();
@@ -767,8 +959,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
             fit: StackFit.expand,
             children: [
               Video(controller: _video, controls: NoVideoControls, fit: _fit),
-              if (_buffering && _error == null)
-                const Center(child: CircularProgressIndicator()),
+              if ((_buffering || _status != null) && _error == null)
+                Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(),
+                      if (_status != null) ...[
+                        const SizedBox(height: 16),
+                        Text(_status!,
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+                      ],
+                    ],
+                  ),
+                ),
               if (_error != null)
                 Center(
                   child: Column(
@@ -777,7 +982,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       Text(_error!, style: const TextStyle(color: Colors.white)),
                       const SizedBox(height: 16),
                       FilledButton(
-                        onPressed: _open,
+                        onPressed: () => _open(),
                         child: const Text('Tentar novamente'),
                       ),
                     ],
