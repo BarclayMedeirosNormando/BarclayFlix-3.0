@@ -108,6 +108,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   /// Espera (s) antes de cada nova tentativa depois de uma queda.
   static const List<int> _retryDelays = [1, 2, 4, 6, 8, 8];
+  static const String _noSignal = 'Sem sinal. Reconectando…';
+  // Depois das tentativas rápidas, segue tentando a cada 15 s (até 20 vezes) sozinho.
+  int _slowTries = 0;
   int _retry = 0;
   bool _didRetry = false;
   String _baseExt = '';
@@ -292,6 +295,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _retryTimer?.cancel();
       _stableTimer?.cancel();
       _retry = 0;
+      _slowTries = 0;
       _didRetry = false;
       _ext = null;
       _status = null;
@@ -348,6 +352,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         _buffering = false;
         _error = 'Sem sinal deste canal. Tente novamente.';
       });
+      if (_slowTries < 20) {
+        _slowTries++;
+        _retryTimer = Timer(const Duration(seconds: 15), () {
+          if (mounted) _open(retry: true);
+        });
+      }
       return;
     }
     if (_retry == 0) _baseExt = _curExt;
@@ -382,11 +392,15 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       if (pos != _lastPos || !_player.state.playing || _bgAt != null) {
         _lastPos = pos;
         _lastMove = DateTime.now();
+        if (_status == _noSignal && mounted) setState(() => _status = null);
         return;
       }
-      if (DateTime.now().difference(_lastMove) >= const Duration(seconds: 25)) {
+      final idle = DateTime.now().difference(_lastMove);
+      if (idle >= const Duration(seconds: 15)) {
         timer.cancel();
         _onLiveDown('sem imagem');
+      } else if (idle >= const Duration(seconds: 8) && _status == null && mounted) {
+        setState(() => _status = _noSignal);
       }
     });
   }
@@ -399,6 +413,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       if (!identical(_pb, pb) || pb.failed || pb.ended) return;
       if (_didRetry) _goodExt[widget.serverId] = _curExt;
       _retry = 0;
+      _slowTries = 0;
       _didRetry = false;
     });
   }
